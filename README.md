@@ -1,37 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Chips n' Tips
+
+Offline-first personal finance tracking built with Next.js, Supabase Auth,
+IndexedDB, and Recharts.
 
 ## Getting Started
 
-First, run the development server:
+Create `.env.local` from `.env.example`, then add your Supabase project URL and
+publishable key.
+
+Import `supabase/schema.sql` in the Supabase SQL editor to create the app tables,
+RLS policies, and default category seeding.
+
+Run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) with your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supabase Auth Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Google is the only OAuth provider used by the app.
 
-## Learn More
+1. In Google Cloud, create a Web application OAuth client.
+2. Add the Supabase callback URL shown on the Supabase Google provider page to
+   Google's authorized redirect URIs.
+3. In Supabase, open Authentication > Providers > Google, enable Google, and add
+   the Google client ID and secret.
+4. Add `http://localhost:3000/auth/callback` and the production callback URL to
+   Supabase's redirect allow list.
 
-To learn more about Next.js, take a look at the following resources:
+Email/password signup must not require confirmation emails for this project. In
+the Supabase dashboard, disable **Confirm email** under the email Auth provider
+settings. With Confirm email disabled, Supabase returns a session immediately
+after signup and does not send a signup confirmation email. Email signup is
+blocked by the app until both steps are complete:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Disable Confirm email in Supabase.
+2. Set `NEXT_PUBLIC_ENABLE_EMAIL_SIGNUP=true` in `.env`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The app stores finance data in IndexedDB first. Supabase Auth gives users an
+account and session, while Supabase Database acts as a background backup and
+cross-device restore source.
 
-## Deploy on Vercel
+## Offline-First Data Flow
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Every screen reads from IndexedDB.
+- Every finance edit is committed to IndexedDB before any network request.
+- Signed-in users sync in the background after edits, when the app opens, and
+  when the device comes back online.
+- Logging in on another device restores that account's Supabase backup into a
+  separate, user-scoped IndexedDB cache.
+- Anonymous device data is never automatically attached to an account. After a
+  user authenticates, the app asks whether they want to import it.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# chips-n-tips
+IndexedDB records are partitioned by Supabase user ID, so accounts do not show
+each other's cached data inside the app. Anonymous offline data belongs to the
+browser profile itself and is visible whenever nobody is signed in. IndexedDB
+is not encrypted storage, so people with access to the same OS/browser profile
+can inspect it using browser developer tools.

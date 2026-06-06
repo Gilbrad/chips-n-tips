@@ -1,0 +1,390 @@
+'use client'
+
+import type { User } from '@supabase/supabase-js'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
+import { useAuth } from '@/components/auth-provider'
+import { DEFAULT_CURRENCY } from '@/lib/defaults'
+import { syncUserFinance } from '@/lib/cloud-sync'
+import {
+  addCategory as persistCategory,
+  addPaymentDate as persistPaymentDate,
+  addTransaction as persistTransaction,
+  archiveCategory as persistCategoryArchive,
+  importLocalDataForUser as persistLocalDataImport,
+  loadFinanceSnapshot,
+  togglePaymentDatePaid as persistPaymentDateToggle,
+  updateCurrency as persistCurrency,
+} from '@/lib/offline-db'
+import {
+  LOCAL_USER_ID,
+  type Category,
+  type PaymentDate,
+  type Recurrence,
+  type Transaction,
+  type TransactionType,
+  type UserPreferences,
+} from '@/lib/finance-types'
+
+interface TransactionInput {
+  amount: number
+  categoryId: string
+  description: string
+  occurredOn?: string
+  type: TransactionType
+}
+
+interface CategoryInput {
+  color: string
+  name: string
+  type: TransactionType
+}
+
+interface PaymentDateInput {
+  amount?: number
+  categoryId?: string
+  dueOn: string
+  notes?: string
+  recurrence: Recurrence
+  title: string
+}
+
+interface FinanceContextValue {
+  addCategory: (input: CategoryInput) => Promise<Category>
+  addPaymentDate: (input: PaymentDateInput) => Promise<PaymentDate>
+  addTransaction: (input: TransactionInput) => Promise<Transaction>
+  archiveCategory: (id: string) => Promise<void>
+  categories: Category[]
+  currency: string
+  importLocalData: () => Promise<{ paymentDates: number; transactions: number }>
+  isLoading: boolean
+  paymentDates: PaymentDate[]
+  preferences: UserPreferences | null
+  refresh: () => Promise<void>
+  setCurrency: (currency: string) => Promise<void>
+  syncNow: () => Promise<boolean>
+  syncState: SyncState
+  togglePaymentDatePaid: (id: string) => Promise<void>
+  transactions: Transaction[]
+  userId: string
+}
+
+const FinanceContext = createContext<FinanceContextValue | null>(null)
+
+export type SyncState = 'error' | 'local' | 'offline' | 'synced' | 'syncing'
+
+function sortTransactions(transactions: Transaction[]) {
+  return [...transactions].sort((first, second) =>
+    second.occurredOn.localeCompare(first.occurredOn),
+  )
+}
+
+function sortPaymentDates(paymentDates: PaymentDate[]) {
+  return [...paymentDates].sort((first, second) =>
+    first.dueOn.localeCompare(second.dueOn),
+  )
+}
+
+function sortCategories(categories: Category[]) {
+  return [...categories].sort((first, second) => {
+    if (first.type !== second.type) {
+      return first.type === 'expense' ? -1 : 1
+    }
+
+    return first.name.localeCompare(second.name)
+  })
+}
+
+export function FinanceProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  const userId = user?.id ?? LOCAL_USER_ID
+
+  return (
+    <FinanceSessionProvider key={userId} user={user} userId={userId}>
+      {children}
+    </FinanceSessionProvider>
+  )
+}
+
+function FinanceSessionProvider({
+  children,
+  user,
+  userId,
+}: {
+  children: ReactNode
+  user: User | null
+  userId: string
+}) {
+  const [categories, setCategories] = useState<Category[]>([])
+  const [paymentDates, setPaymentDates] = useState<PaymentDate[]>([])
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null)
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [syncState, setSyncState] = useState<SyncState>(
+    user ? 'offline' : 'local',
+  )
+  const syncInFlight = useRef<Promise<boolean> | null>(null)
+
+  const refresh = useCallback(async () => {
+    await Promise.resolve()
+    setIsLoading(true)
+
+    try {
+      const snapshot = await loadFinanceSnapshot(userId)
+      setCategories(sortCategories(snapshot.categories))
+      setPaymentDates(sortPaymentDates(snapshot.paymentDates))
+      setPreferences(snapshot.preferences)
+      setTransactions(sortTransactions(snapshot.transactions))
+    } finally {
+      setIsLoading(false)
+    }
+  }, [userId])
+
+  const syncNow = useCallback(async () => {
+    if (!user) {
+      setSyncState('local')
+      return false
+    }
+
+    if (syncInFlight.current) {
+      return syncInFlight.current
+    }
+
+    const syncPromise = (async () => {
+      setSyncState('syncing')
+
+      try {
+        const synced = await syncUserFinance(userId)
+
+        if (!synced) {
+          setSyncState('offline')
+          return false
+        }
+
+        const snapshot = await loadFinanceSnapshot(userId)
+        setCategories(sortCategories(snapshot.categories))
+        setPaymentDates(sortPaymentDates(snapshot.paymentDates))
+        setPreferences(snapshot.preferences)
+        setTransactions(sortTransactions(snapshot.transactions))
+        setSyncState('synced')
+
+        return true
+      } catch {
+        setSyncState('error')
+        return false
+      } finally {
+        syncInFlight.current = null
+      }
+    })()
+
+    syncInFlight.current = syncPromise
+    return syncPromise
+  }, [user, userId])
+
+  const queueCloudBackup = useCallback(() => {
+    if (!user) {
+      return
+    }
+
+    window.setTimeout(() => {
+      void syncNow()
+    }, 250)
+  }, [syncNow, user])
+
+  useEffect(() => {
+    let active = true
+    const timeoutId = window.setTimeout(() => {
+      setIsLoading(true)
+
+      void loadFinanceSnapshot(userId)
+        .then((snapshot) => {
+          if (!active) {
+            return
+          }
+
+          setCategories(sortCategories(snapshot.categories))
+          setPaymentDates(sortPaymentDates(snapshot.paymentDates))
+          setPreferences(snapshot.preferences)
+          setTransactions(sortTransactions(snapshot.transactions))
+        })
+        .finally(() => {
+          if (active) {
+            setIsLoading(false)
+          }
+        })
+    }, 0)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [userId])
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    const syncWhenOnline = () => {
+      void syncNow()
+    }
+    const timeoutId = window.setTimeout(syncWhenOnline, 350)
+
+    window.addEventListener('online', syncWhenOnline)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+      window.removeEventListener('online', syncWhenOnline)
+    }
+  }, [syncNow, user])
+
+  const addTransaction = useCallback(
+    async (input: TransactionInput) => {
+      const transaction = await persistTransaction({ ...input, userId })
+
+      setTransactions((current) => sortTransactions([transaction, ...current]))
+      queueCloudBackup()
+
+      return transaction
+    },
+    [queueCloudBackup, userId],
+  )
+
+  const addCategory = useCallback(
+    async (input: CategoryInput) => {
+      const category = await persistCategory({ ...input, userId })
+
+      setCategories((current) => sortCategories([category, ...current]))
+      queueCloudBackup()
+
+      return category
+    },
+    [queueCloudBackup, userId],
+  )
+
+  const archiveCategory = useCallback(
+    async (id: string) => {
+      await persistCategoryArchive(id)
+      setCategories((current) =>
+        current.filter((category) => category.id !== id),
+      )
+      queueCloudBackup()
+    },
+    [queueCloudBackup],
+  )
+
+  const addPaymentDate = useCallback(
+    async (input: PaymentDateInput) => {
+      const paymentDate = await persistPaymentDate({ ...input, userId })
+
+      setPaymentDates((current) => sortPaymentDates([...current, paymentDate]))
+      queueCloudBackup()
+
+      return paymentDate
+    },
+    [queueCloudBackup, userId],
+  )
+
+  const togglePaymentDatePaid = useCallback(
+    async (id: string) => {
+      const updated = await persistPaymentDateToggle(id)
+
+      if (!updated) {
+        return
+      }
+
+      setPaymentDates((current) =>
+        sortPaymentDates(
+          current.map((paymentDate) =>
+            paymentDate.id === id ? updated : paymentDate,
+          ),
+        ),
+      )
+      queueCloudBackup()
+    },
+    [queueCloudBackup],
+  )
+
+  const setCurrency = useCallback(
+    async (currency: string) => {
+      const updated = await persistCurrency(userId, currency)
+      setPreferences(updated)
+      queueCloudBackup()
+    },
+    [queueCloudBackup, userId],
+  )
+
+  const importLocalData = useCallback(async () => {
+    if (!user) {
+      throw new Error('Sign in before importing local data.')
+    }
+
+    const result = await persistLocalDataImport(userId)
+    await refresh()
+    queueCloudBackup()
+
+    return result
+  }, [queueCloudBackup, refresh, user, userId])
+
+  const value = useMemo(
+    () => ({
+      addCategory,
+      addPaymentDate,
+      addTransaction,
+      archiveCategory,
+      categories,
+      currency: preferences?.currency ?? DEFAULT_CURRENCY,
+      importLocalData,
+      isLoading,
+      paymentDates,
+      preferences,
+      refresh,
+      setCurrency,
+      syncNow,
+      syncState,
+      togglePaymentDatePaid,
+      transactions,
+      userId,
+    }),
+    [
+      addCategory,
+      addPaymentDate,
+      addTransaction,
+      archiveCategory,
+      categories,
+      importLocalData,
+      isLoading,
+      paymentDates,
+      preferences,
+      refresh,
+      setCurrency,
+      syncNow,
+      syncState,
+      togglePaymentDatePaid,
+      transactions,
+      userId,
+    ],
+  )
+
+  return (
+    <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>
+  )
+}
+
+export function useFinance() {
+  const context = useContext(FinanceContext)
+
+  if (!context) {
+    throw new Error('useFinance must be used inside FinanceProvider.')
+  }
+
+  return context
+}
