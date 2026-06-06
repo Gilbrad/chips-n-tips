@@ -4,8 +4,17 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { CheckCircle2, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useFinance } from '@/components/finance-provider'
-import { getMonthGrid, getMonthTitle, toDateInputValue } from '@/lib/dates'
-import { formatCurrency, formatDateLabel } from '@/lib/format'
+import {
+  getMonthGrid,
+  getMonthTitle,
+  isDateWithinRange,
+  toDateInputValue,
+} from '@/lib/dates'
+import {
+  formatCurrency,
+  formatDateLabel,
+  formatDateRangeLabel,
+} from '@/lib/format'
 import type { PaymentDate, Recurrence } from '@/lib/finance-types'
 
 export default function CalendarPage() {
@@ -22,11 +31,14 @@ export default function CalendarPage() {
     new Date(now.getFullYear(), now.getMonth(), 1),
   )
   const [selectedDate, setSelectedDate] = useState(toDateInputValue())
+  const [rangeEndDate, setRangeEndDate] = useState('')
   const [title, setTitle] = useState('')
   const [amount, setAmount] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [recurrence, setRecurrence] = useState<Recurrence>('none')
   const [notes, setNotes] = useState('')
+  const [error, setError] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
 
   const year = visibleMonth.getFullYear()
   const month = visibleMonth.getMonth()
@@ -48,42 +60,86 @@ export default function CalendarPage() {
   }, [transactions])
 
   const paymentsByDay = useMemo(() => {
-    return paymentDates.reduce<Record<string, PaymentDate[]>>(
-      (groups, paymentDate) => {
-        groups[paymentDate.dueOn] = [
-          ...(groups[paymentDate.dueOn] ?? []),
-          paymentDate,
+    return Object.fromEntries(
+      calendarDays.map((day) => {
+        const dateValue = toDateInputValue(day)
+
+        return [
+          dateValue,
+          paymentDates.filter((paymentDate) =>
+            isDateWithinRange(
+              dateValue,
+              paymentDate.dueOn,
+              paymentDate.dueEndOn,
+            ),
+          ),
         ]
+      }),
+    ) as Record<string, PaymentDate[]>
+  }, [calendarDays, paymentDates])
 
-        return groups
-      },
-      {},
-    )
-  }, [paymentDates])
+  const selectedPayments = useMemo(
+    () =>
+      paymentDates.filter((paymentDate) =>
+        isDateWithinRange(
+          selectedDate,
+          paymentDate.dueOn,
+          paymentDate.dueEndOn,
+        ),
+      ),
+    [paymentDates, selectedDate],
+  )
 
-  const selectedPayments = paymentsByDay[selectedDate] ?? []
+  const selectStartDate = (dateValue: string) => {
+    setSelectedDate(dateValue)
+
+    if (rangeEndDate && rangeEndDate < dateValue) {
+      setRangeEndDate('')
+    }
+  }
+
+  const handleStartDateChange = (dateValue: string) => {
+    selectStartDate(dateValue)
+
+    if (dateValue) {
+      const date = new Date(`${dateValue}T00:00:00`)
+      setVisibleMonth(new Date(date.getFullYear(), date.getMonth(), 1))
+    }
+  }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     const trimmedTitle = title.trim()
 
-    if (!trimmedTitle) {
+    if (!trimmedTitle || (rangeEndDate && rangeEndDate < selectedDate)) {
+      setError('Enter a title and make sure the end date follows the start date.')
       return
     }
 
-    await addPaymentDate({
-      amount: amount ? Number(amount) : undefined,
-      categoryId: categoryId || undefined,
-      dueOn: selectedDate,
-      notes: notes.trim() || undefined,
-      recurrence,
-      title: trimmedTitle,
-    })
+    setError('')
+    setIsSaving(true)
 
-    setTitle('')
-    setAmount('')
-    setNotes('')
+    try {
+      await addPaymentDate({
+        amount: amount ? Number(amount) : undefined,
+        categoryId: categoryId || undefined,
+        dueEndOn: rangeEndDate || undefined,
+        dueOn: selectedDate,
+        notes: notes.trim() || undefined,
+        recurrence,
+        title: trimmedTitle,
+      })
+
+      setTitle('')
+      setAmount('')
+      setRangeEndDate('')
+      setNotes('')
+    } catch {
+      setError('Could not save this date. Please check the details and try again.')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -94,7 +150,7 @@ export default function CalendarPage() {
             Calendar
           </p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            Payment dates
+            Important dates
           </h1>
         </div>
         <div className="flex items-center gap-2">
@@ -148,7 +204,13 @@ export default function CalendarPage() {
             {calendarDays.map((day) => {
               const iso = toDateInputValue(day)
               const total = totalsByDay[iso] ?? 0
-              const hasPayment = Boolean(paymentsByDay[iso]?.length)
+              const dayPayments = paymentsByDay[iso] ?? []
+              const hasPayment = dayPayments.length > 0
+              const hasRange = dayPayments.some(
+                (paymentDate) =>
+                  paymentDate.dueEndOn &&
+                  paymentDate.dueEndOn !== paymentDate.dueOn,
+              )
               const inMonth = day.getMonth() === month
               const selected = selectedDate === iso
 
@@ -160,13 +222,17 @@ export default function CalendarPage() {
                       : 'border-border bg-background hover:bg-muted'
                   } ${inMonth ? '' : 'opacity-45'}`}
                   key={iso}
-                  onClick={() => setSelectedDate(iso)}
+                  onClick={() => selectStartDate(iso)}
                   type="button"
                 >
                   <div className="flex items-center justify-between text-sm font-semibold">
                     <span>{day.getDate()}</span>
                     {hasPayment ? (
-                      <span className="h-2 w-2 rounded-full bg-accent" />
+                      <span
+                        className={`h-2 rounded-full bg-accent ${
+                          hasRange ? 'w-5' : 'w-2'
+                        }`}
+                      />
                     ) : null}
                   </div>
                   <p className="mt-2 truncate text-xs text-muted-foreground">
@@ -180,21 +246,40 @@ export default function CalendarPage() {
 
         <aside className="flex flex-col gap-4">
           <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
-            <h2 className="text-lg font-semibold">Add payment</h2>
+            <h2 className="text-lg font-semibold">Add date or estimate</h2>
             <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
               <input
                 className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                maxLength={120}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="Rent, loan, subscription"
+                placeholder="Rent, subscription, parcel arrival"
                 type="text"
                 value={title}
               />
-              <input
-                className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                onChange={(event) => setSelectedDate(event.target.value)}
-                type="date"
-                value={selectedDate}
-              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-sm font-medium text-foreground">
+                  Start date
+                  <input
+                    className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    onChange={(event) =>
+                      handleStartDateChange(event.target.value)
+                    }
+                    required
+                    type="date"
+                    value={selectedDate}
+                  />
+                </label>
+                <label className="grid gap-1.5 text-sm font-medium text-foreground">
+                  Estimated end
+                  <input
+                    className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    min={selectedDate}
+                    onChange={(event) => setRangeEndDate(event.target.value)}
+                    type="date"
+                    value={rangeEndDate}
+                  />
+                </label>
+              </div>
               <input
                 className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 min="0"
@@ -232,10 +317,19 @@ export default function CalendarPage() {
                 placeholder="Notes"
                 value={notes}
               />
-              <Button className="h-11 w-full gap-2" type="submit">
+              <Button
+                className="h-11 w-full gap-2"
+                disabled={isSaving}
+                type="submit"
+              >
                 <Plus size={16} />
-                Save payment
+                {isSaving ? 'Saving' : 'Save date'}
               </Button>
+              {error ? (
+                <p className="text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+              ) : null}
             </form>
           </section>
 
@@ -251,7 +345,7 @@ export default function CalendarPage() {
 
             {selectedPayments.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                No payments on this date.
+                No important dates include this day.
               </p>
             ) : (
               <div className="space-y-2">
@@ -271,17 +365,28 @@ export default function CalendarPage() {
                             : 'No amount'}{' '}
                           / {paymentDate.recurrence}
                         </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {formatDateRangeLabel(
+                            paymentDate.dueOn,
+                            paymentDate.dueEndOn,
+                          )}
+                        </p>
                       </div>
                       <Button
                         aria-label={
                           paymentDate.paidAt
-                            ? 'Mark payment unpaid'
-                            : 'Mark payment paid'
+                            ? 'Mark item pending'
+                            : 'Mark item complete'
                         }
                         onClick={() =>
                           void togglePaymentDatePaid(paymentDate.id)
                         }
                         size="icon"
+                        title={
+                          paymentDate.paidAt
+                            ? 'Mark item pending'
+                            : 'Mark item complete'
+                        }
                         type="button"
                         variant={paymentDate.paidAt ? 'default' : 'outline'}
                       >

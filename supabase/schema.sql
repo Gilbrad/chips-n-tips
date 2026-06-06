@@ -69,6 +69,9 @@ create table if not exists public.payment_dates (
   amount numeric(12, 2) check (amount is null or amount > 0),
   category_id uuid,
   due_on date not null,
+  due_end_on date
+    constraint payment_dates_due_range_check
+    check (due_end_on is null or due_end_on >= due_on),
   recurrence public.recurrence_type not null default 'none',
   notes text,
   paid_at timestamptz,
@@ -85,6 +88,19 @@ alter table public.transactions
 
 alter table public.payment_dates
   add column if not exists deleted_at timestamptz;
+
+alter table public.payment_dates
+  add column if not exists due_end_on date;
+
+do $$
+begin
+  alter table public.payment_dates
+    add constraint payment_dates_due_range_check
+    check (due_end_on is null or due_end_on >= due_on);
+exception
+  when duplicate_object then null;
+end
+$$;
 
 create index if not exists categories_user_id_idx
   on public.categories(user_id)

@@ -53,6 +53,7 @@ interface CategoryInput {
 interface PaymentDateInput {
   amount?: number
   categoryId?: string
+  dueEndOn?: string
   dueOn: string
   notes?: string
   recurrence: Recurrence

@@ -12,7 +12,7 @@ import TransactionList from '@/components/transaction-list'
 import TransactionModal from '@/components/transaction-modal'
 import { useFinance } from '@/components/finance-provider'
 import { toDateInputValue } from '@/lib/dates'
-import { formatCurrency } from '@/lib/format'
+import { formatCurrency, formatDateRangeLabel } from '@/lib/format'
 import type { Transaction, TransactionType } from '@/lib/finance-types'
 
 const SpendingChart = dynamic(() => import('@/components/spending-chart'), {
@@ -112,8 +112,17 @@ export default function Dashboard() {
   const upcomingPayment = useMemo(
     () =>
       paymentDates
-        .filter((paymentDate) => !paymentDate.paidAt && paymentDate.dueOn >= today)
-        .sort((first, second) => first.dueOn.localeCompare(second.dueOn))[0],
+        .filter(
+          (paymentDate) =>
+            !paymentDate.paidAt &&
+            (paymentDate.dueEndOn ?? paymentDate.dueOn) >= today,
+        )
+        .sort((first, second) => {
+          const firstDate = first.dueOn < today ? today : first.dueOn
+          const secondDate = second.dueOn < today ? today : second.dueOn
+
+          return firstDate.localeCompare(secondDate)
+        })[0],
     [paymentDates, today],
   )
 
@@ -200,14 +209,14 @@ export default function Dashboard() {
           <StatsCard
             description={
               upcomingPayment
-                ? new Intl.DateTimeFormat('en-US', {
-                    day: 'numeric',
-                    month: 'short',
-                  }).format(new Date(`${upcomingPayment.dueOn}T00:00:00`))
+                ? formatDateRangeLabel(
+                    upcomingPayment.dueOn,
+                    upcomingPayment.dueEndOn,
+                  )
                 : 'No dates set'
             }
             icon={CalendarClock}
-            label="Next payment"
+            label="Next date"
             value={upcomingPayment?.title ?? 'None'}
           />
         </div>

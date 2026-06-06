@@ -49,6 +49,7 @@ interface PaymentDateRow {
   amount: number | string | null
   category_id: string | null
   created_at: string
+  due_end_on: string | null
   due_on: string
   id: string
   notes: string | null
@@ -135,6 +136,7 @@ function paymentDateFromRow(row: PaymentDateRow): PaymentDate {
     amount: row.amount === null ? undefined : Number(row.amount),
     categoryId: row.category_id ?? undefined,
     createdAt: row.created_at,
+    dueEndOn: row.due_end_on ?? undefined,
     dueOn: row.due_on,
     id: row.id,
     notes: row.notes ?? undefined,
@@ -221,6 +223,7 @@ function paymentDateToRow(paymentDate: PaymentDate): PaymentDateRow {
     amount: paymentDate.amount ?? null,
     category_id: paymentDate.categoryId ?? null,
     created_at: paymentDate.createdAt,
+    due_end_on: paymentDate.dueEndOn ?? null,
     due_on: paymentDate.dueOn,
     id: paymentDate.id,
     notes: paymentDate.notes ?? null,

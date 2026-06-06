@@ -119,6 +119,45 @@ async function assertValidTransactionInput(
   }
 }
 
+async function assertValidPaymentDateInput(
+  db: IDBPDatabase<ChipsNTipsDb>,
+  input: {
+    amount?: number
+    categoryId?: string
+    dueEndOn?: string
+    dueOn: string
+    title: string
+    userId: string
+  },
+) {
+  const title = input.title.trim()
+  const category = input.categoryId
+    ? await db.get('categories', input.categoryId)
+    : undefined
+  const validAmount =
+    input.amount === undefined ||
+    (Number.isFinite(input.amount) &&
+      input.amount > 0 &&
+      input.amount <= 9_999_999_999.99)
+
+  if (
+    !title ||
+    title.length > 120 ||
+    !validAmount ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(input.dueOn) ||
+    (input.dueEndOn &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(input.dueEndOn) ||
+        input.dueEndOn < input.dueOn)) ||
+    (input.categoryId &&
+      (!category ||
+        category.userId !== input.userId ||
+        category.type !== 'expense' ||
+        category.archivedAt))
+  ) {
+    throw new Error('Payment date details are invalid.')
+  }
+}
+
 async function getCategoriesForUser(userId: string) {
   const db = await getDb()
   const categories = await db.getAllFromIndex('categories', 'by-user', userId)
@@ -318,6 +357,7 @@ export async function archiveCategory(id: string) {
 export async function addPaymentDate(input: {
   amount?: number
   categoryId?: string
+  dueEndOn?: string
   dueOn: string
   notes?: string
   recurrence: Recurrence
@@ -325,6 +365,7 @@ export async function addPaymentDate(input: {
   userId: string
 }) {
   const db = await getDb()
+  await assertValidPaymentDateInput(db, input)
   const now = new Date().toISOString()
   const paymentDate: PaymentDate = {
     id: createId(),
@@ -332,6 +373,10 @@ export async function addPaymentDate(input: {
     title: input.title.trim(),
     amount: input.amount ? Number(input.amount.toFixed(2)) : undefined,
     categoryId: input.categoryId,
+    dueEndOn:
+      input.dueEndOn && input.dueEndOn !== input.dueOn
+        ? input.dueEndOn
+        : undefined,
     dueOn: input.dueOn,
     recurrence: input.recurrence,
     notes: input.notes?.trim(),

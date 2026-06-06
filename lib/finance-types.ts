@@ -40,6 +40,7 @@ export interface PaymentDate {
   amount?: number
   categoryId?: string
   dueOn: string
+  dueEndOn?: string
   recurrence: Recurrence
   notes?: string
   paidAt?: string

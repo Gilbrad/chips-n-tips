@@ -12,6 +12,14 @@ export function addDays(date: Date, days: number): Date {
   return next
 }
 
+export function isDateWithinRange(
+  dateValue: string,
+  startDate: string,
+  endDate?: string,
+): boolean {
+  return dateValue >= startDate && dateValue <= (endDate ?? startDate)
+}
+
 export function getMonthGrid(year: number, month: number): Date[] {
   const firstOfMonth = new Date(year, month, 1)
   const gridStart = addDays(firstOfMonth, -firstOfMonth.getDay())

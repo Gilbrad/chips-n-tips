@@ -25,3 +25,14 @@ export function formatDateLabel(dateValue: string): string {
     year: 'numeric',
   }).format(new Date(`${dateValue}T00:00:00`))
 }
+
+export function formatDateRangeLabel(
+  startDate: string,
+  endDate?: string,
+): string {
+  if (!endDate || endDate === startDate) {
+    return formatDateLabel(startDate)
+  }
+
+  return `${formatDateLabel(startDate)} - ${formatDateLabel(endDate)}`
+}
