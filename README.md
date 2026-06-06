@@ -19,31 +19,6 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser.
 
-## Supabase Auth Setup
-
-Google is the only OAuth provider used by the app.
-
-1. In Google Cloud, create a Web application OAuth client.
-2. Add the Supabase callback URL shown on the Supabase Google provider page to
-   Google's authorized redirect URIs.
-3. In Supabase, open Authentication > Providers > Google, enable Google, and add
-   the Google client ID and secret.
-4. Add `http://localhost:3000/auth/callback` and the production callback URL to
-   Supabase's redirect allow list.
-
-Email/password signup must not require confirmation emails for this project. In
-the Supabase dashboard, disable **Confirm email** under the email Auth provider
-settings. With Confirm email disabled, Supabase returns a session immediately
-after signup and does not send a signup confirmation email. Email signup is
-blocked by the app until both steps are complete:
-
-1. Disable Confirm email in Supabase.
-2. Set `NEXT_PUBLIC_ENABLE_EMAIL_SIGNUP=true` in `.env`.
-
-The app stores finance data in IndexedDB first. Supabase Auth gives users an
-account and session, while Supabase Database acts as a background backup and
-cross-device restore source.
-
 ## Offline-First Data Flow
 
 - Every screen reads from IndexedDB.
