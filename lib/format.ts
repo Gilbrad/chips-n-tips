@@ -18,6 +18,20 @@ export function formatCurrency(amount: number, currencyCode: string): string {
   }).format(amount)
 }
 
+export function formatCompactCurrency(
+  amount: number,
+  currencyCode: string,
+): string {
+  const currency = getCurrencyMeta(currencyCode)
+
+  return new Intl.NumberFormat(currency.locale, {
+    currency: currency.code,
+    maximumFractionDigits: 1,
+    notation: 'compact',
+    style: 'currency',
+  }).format(amount)
+}
+
 export function formatDateLabel(dateValue: string): string {
   return new Intl.DateTimeFormat('en-US', {
     day: 'numeric',

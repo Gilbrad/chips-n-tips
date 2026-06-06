@@ -2,13 +2,15 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   CalendarDays,
+  ChartNoAxesCombined,
   CircleDollarSign,
   LayoutDashboard,
   LogIn,
   LogOut,
+  MoreHorizontal,
   Tags,
   UserPlus,
   WalletCards,
@@ -24,18 +26,23 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const { isConfigured, isLoading: isAuthLoading, signOut, user } = useAuth()
   const { currency, syncState } = useFinance()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const navItems = useMemo(
     () => [
       { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/analytics', label: 'Analytics', icon: ChartNoAxesCombined },
       { href: '/calendar', label: 'Calendar', icon: CalendarDays },
       { href: '/currency', label: 'Currency', icon: CircleDollarSign },
       { href: '/categories', label: 'Categories', icon: Tags },
     ],
     [],
   )
+  const mobileNavItems = navItems.filter(({ href }) => href !== '/currency')
 
   const handleAuthAction = async () => {
+    setIsMobileMenuOpen(false)
+
     if (!user) {
       router.push('/login')
       return
@@ -146,8 +153,71 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <main className="min-w-0 flex-1 pb-24 lg:pb-0">{children}</main>
 
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-3 py-2 backdrop-blur lg:hidden">
-          <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
-            {navItems.map(({ href, label, icon: Icon }) => {
+          {isMobileMenuOpen ? (
+            <>
+              <button
+                aria-label="Close more menu"
+                className="fixed inset-0 bottom-16 z-0 cursor-default bg-foreground/10"
+                onClick={() => setIsMobileMenuOpen(false)}
+                type="button"
+              />
+              <div
+                className="absolute bottom-full right-3 z-10 mb-2 w-56 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                id="mobile-more-menu"
+              >
+                <Link
+                  className={cn(
+                    'flex h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors',
+                    pathname === '/currency'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-muted',
+                  )}
+                  href="/currency"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <CircleDollarSign size={18} />
+                  Currency
+                  <span className="ml-auto text-xs opacity-70">{currency}</span>
+                </Link>
+
+                <div className="my-2 border-t border-border" />
+
+                {user ? (
+                  <button
+                    className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+                    disabled={isAuthLoading}
+                    onClick={() => void handleAuthAction()}
+                    type="button"
+                  >
+                    <LogOut size={18} />
+                    {isAuthLoading ? 'Checking session' : 'Sign out'}
+                  </button>
+                ) : (
+                  <>
+                    <Link
+                      className="flex h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors hover:bg-muted"
+                      href="/login"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      <LogIn size={18} />
+                      Log in
+                    </Link>
+                    <Link
+                      className="flex h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors hover:bg-muted"
+                      href="/signup"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      <UserPlus size={18} />
+                      Sign up
+                    </Link>
+                  </>
+                )}
+              </div>
+            </>
+          ) : null}
+
+          <div className="relative z-10 mx-auto grid max-w-md grid-cols-5 gap-1">
+            {mobileNavItems.map(({ href, label, icon: Icon }) => {
               const active = pathname === href
 
               return (
@@ -161,6 +231,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   )}
                   href={href}
                   key={href}
+                  onClick={() => setIsMobileMenuOpen(false)}
                 >
                   <Icon size={17} />
                   <span className="w-full truncate px-1 text-center">{label}</span>
@@ -168,20 +239,20 @@ export default function AppShell({ children }: { children: ReactNode }) {
               )
             })}
             <button
+              aria-controls="mobile-more-menu"
+              aria-expanded={isMobileMenuOpen}
+              aria-label="More navigation options"
               className={cn(
                 'flex h-12 flex-col items-center justify-center gap-1 rounded-lg text-[0.68rem] font-medium transition-colors',
-                user
-                  ? 'text-destructive hover:bg-destructive/10'
+                isMobileMenuOpen || pathname === '/currency'
+                  ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground',
               )}
-              disabled={isAuthLoading}
-              onClick={() => void handleAuthAction()}
+              onClick={() => setIsMobileMenuOpen((current) => !current)}
               type="button"
             >
-              {user ? <LogOut size={17} /> : <LogIn size={17} />}
-              <span className="w-full truncate px-1 text-center">
-                {isAuthLoading ? 'Checking' : user ? 'Sign out' : 'Log in'}
-              </span>
+              <MoreHorizontal size={17} />
+              <span className="w-full truncate px-1 text-center">More</span>
             </button>
           </div>
         </nav>
