@@ -60,3 +60,15 @@ each other's cached data inside the app. Anonymous offline data belongs to the
 browser profile itself and is visible whenever nobody is signed in. IndexedDB
 is not encrypted storage, so people with access to the same OS/browser profile
 can inspect it using browser developer tools.
+
+## PWA And Offline Access
+
+Production builds use Serwist to precache the application shell, finance pages,
+and required Next.js assets. After a user opens the deployed app once while
+online, the installed PWA can launch and continue reading or editing its
+IndexedDB ledger without internet. Pending changes sync to Supabase when the
+device comes back online.
+
+Authentication, first-time installation, and cloud synchronization require an
+internet connection. PWA installation also requires an HTTPS production
+deployment; the service worker is intentionally disabled during `pnpm dev`.

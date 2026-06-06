@@ -236,13 +236,18 @@ function FinanceSessionProvider({
     const syncWhenOnline = () => {
       void syncNow()
     }
+    const markOffline = () => {
+      setSyncState('offline')
+    }
     const timeoutId = window.setTimeout(syncWhenOnline, 350)
 
     window.addEventListener('online', syncWhenOnline)
+    window.addEventListener('offline', markOffline)
 
     return () => {
       window.clearTimeout(timeoutId)
       window.removeEventListener('online', syncWhenOnline)
+      window.removeEventListener('offline', markOffline)
     }
   }, [syncNow, user])
 

@@ -8,23 +8,25 @@ export default function manifest(): MetadataRoute.Manifest {
     display: 'standalone',
     icons: [
       {
-        sizes: 'any',
-        src: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-      {
-        sizes: '32x32',
-        src: '/icon-light-32x32.png',
+        sizes: '192x192',
+        src: '/icon-192x192.png',
         type: 'image/png',
       },
       {
-        sizes: '180x180',
-        src: '/apple-icon.png',
+        purpose: 'maskable',
+        sizes: '512x512',
+        src: '/icon-maskable-512x512.png',
+        type: 'image/png',
+      },
+      {
+        sizes: '512x512',
+        src: '/icon-512x512.png',
         type: 'image/png',
       },
     ],
     name: "Chips n' Tips",
     short_name: 'Chips',
+    scope: '/',
     start_url: '/',
     theme_color: '#0f766e',
   }
