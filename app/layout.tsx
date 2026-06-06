@@ -7,6 +7,7 @@ import { AuthProvider } from '@/components/auth-provider'
 import AppShell from '@/components/app-shell'
 import { FinanceProvider } from '@/components/finance-provider'
 import ServiceWorkerRegister from '@/components/service-worker-register'
+import { SpeedInsights } from "@vercel/speed-insights/next"
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -77,6 +78,7 @@ export default function RootLayout({
         )}
         <ServiceWorkerRegister />
         {process.env.NODE_ENV === 'production' && <Analytics />}
+        {process.env.NODE_ENV === 'production' && <SpeedInsights />}
       </body>
     </html>
   )
