@@ -36,6 +36,7 @@ interface TransactionRow {
   amount: number | string
   category_id: string
   created_at: string
+  deleted_at: string | null
   description: string
   id: string
   occurred_on: string
@@ -118,6 +119,7 @@ function transactionFromRow(row: TransactionRow): Transaction {
     amount: Number(row.amount),
     categoryId: row.category_id,
     createdAt: row.created_at,
+    deletedAt: row.deleted_at ?? undefined,
     description: row.description,
     id: row.id,
     occurredOn: row.occurred_on,
@@ -204,6 +206,7 @@ function transactionToRow(transaction: Transaction): TransactionRow {
     amount: transaction.amount,
     category_id: transaction.categoryId,
     created_at: transaction.createdAt,
+    deleted_at: transaction.deletedAt ?? null,
     description: transaction.description,
     id: transaction.id,
     occurred_on: transaction.occurredOn,

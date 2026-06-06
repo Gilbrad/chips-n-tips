@@ -19,9 +19,11 @@ import {
   addPaymentDate as persistPaymentDate,
   addTransaction as persistTransaction,
   archiveCategory as persistCategoryArchive,
+  deleteTransaction as persistTransactionDelete,
   importLocalDataForUser as persistLocalDataImport,
   loadFinanceSnapshot,
   togglePaymentDatePaid as persistPaymentDateToggle,
+  updateTransaction as persistTransactionUpdate,
   updateCurrency as persistCurrency,
 } from '@/lib/offline-db'
 import {
@@ -38,7 +40,7 @@ interface TransactionInput {
   amount: number
   categoryId: string
   description: string
-  occurredOn?: string
+  occurredOn: string
   type: TransactionType
 }
 
@@ -64,6 +66,7 @@ interface FinanceContextValue {
   archiveCategory: (id: string) => Promise<void>
   categories: Category[]
   currency: string
+  deleteTransaction: (id: string) => Promise<void>
   importLocalData: () => Promise<{ paymentDates: number; transactions: number }>
   isLoading: boolean
   paymentDates: PaymentDate[]
@@ -74,6 +77,10 @@ interface FinanceContextValue {
   syncState: SyncState
   togglePaymentDatePaid: (id: string) => Promise<void>
   transactions: Transaction[]
+  updateTransaction: (
+    id: string,
+    input: TransactionInput,
+  ) => Promise<Transaction>
   userId: string
 }
 
@@ -263,6 +270,44 @@ function FinanceSessionProvider({
     [queueCloudBackup, userId],
   )
 
+  const updateTransaction = useCallback(
+    async (id: string, input: TransactionInput) => {
+      const transaction = await persistTransactionUpdate(id, userId, input)
+
+      if (!transaction) {
+        throw new Error('Transaction could not be updated.')
+      }
+
+      setTransactions((current) =>
+        sortTransactions(
+          current.map((item) =>
+            item.id === transaction.id ? transaction : item,
+          ),
+        ),
+      )
+      queueCloudBackup()
+
+      return transaction
+    },
+    [queueCloudBackup, userId],
+  )
+
+  const deleteTransaction = useCallback(
+    async (id: string) => {
+      const transaction = await persistTransactionDelete(id, userId)
+
+      if (!transaction) {
+        return
+      }
+
+      setTransactions((current) =>
+        current.filter((item) => item.id !== transaction.id),
+      )
+      queueCloudBackup()
+    },
+    [queueCloudBackup, userId],
+  )
+
   const addCategory = useCallback(
     async (input: CategoryInput) => {
       const category = await persistCategory({ ...input, userId })
@@ -347,6 +392,7 @@ function FinanceSessionProvider({
       archiveCategory,
       categories,
       currency: preferences?.currency ?? DEFAULT_CURRENCY,
+      deleteTransaction,
       importLocalData,
       isLoading,
       paymentDates,
@@ -357,6 +403,7 @@ function FinanceSessionProvider({
       syncState,
       togglePaymentDatePaid,
       transactions,
+      updateTransaction,
       userId,
     }),
     [
@@ -365,6 +412,7 @@ function FinanceSessionProvider({
       addTransaction,
       archiveCategory,
       categories,
+      deleteTransaction,
       importLocalData,
       isLoading,
       paymentDates,
@@ -375,6 +423,7 @@ function FinanceSessionProvider({
       syncState,
       togglePaymentDatePaid,
       transactions,
+      updateTransaction,
       userId,
     ],
   )

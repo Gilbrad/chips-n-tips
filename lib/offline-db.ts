@@ -89,6 +89,36 @@ function createId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+async function assertValidTransactionInput(
+  db: IDBPDatabase<ChipsNTipsDb>,
+  input: {
+    amount: number
+    categoryId: string
+    description: string
+    occurredOn?: string
+    type: TransactionType
+    userId: string
+  },
+) {
+  const category = await db.get('categories', input.categoryId)
+
+  if (
+    !Number.isFinite(input.amount) ||
+    input.amount <= 0 ||
+    input.amount > 9_999_999_999.99 ||
+    !input.description.trim() ||
+    input.description.trim().length > 160 ||
+    (input.occurredOn &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(input.occurredOn)) ||
+    !category ||
+    category.userId !== input.userId ||
+    category.type !== input.type ||
+    category.archivedAt
+  ) {
+    throw new Error('Transaction details are invalid.')
+  }
+}
+
 async function getCategoriesForUser(userId: string) {
   const db = await getDb()
   const categories = await db.getAllFromIndex('categories', 'by-user', userId)
@@ -146,9 +176,11 @@ export async function loadFinanceSnapshot(userId: string): Promise<FinanceSnapsh
       first.dueOn.localeCompare(second.dueOn),
     ),
     preferences: preferences ?? createDefaultPreferences(userId),
-    transactions: transactions.sort((first, second) =>
-      second.occurredOn.localeCompare(first.occurredOn),
-    ),
+    transactions: transactions
+      .filter((transaction) => !transaction.deletedAt)
+      .sort((first, second) =>
+        second.occurredOn.localeCompare(first.occurredOn),
+      ),
   }
 }
 
@@ -161,6 +193,7 @@ export async function addTransaction(input: {
   userId: string
 }) {
   const db = await getDb()
+  await assertValidTransactionInput(db, input)
   const now = new Date().toISOString()
   const transaction: Transaction = {
     id: createId(),
@@ -178,6 +211,63 @@ export async function addTransaction(input: {
   await db.put('transactions', transaction)
 
   return transaction
+}
+
+export async function updateTransaction(
+  id: string,
+  userId: string,
+  input: {
+    amount: number
+    categoryId: string
+    description: string
+    occurredOn: string
+    type: TransactionType
+  },
+) {
+  const db = await getDb()
+  const transaction = await db.get('transactions', id)
+
+  if (!transaction || transaction.userId !== userId || transaction.deletedAt) {
+    return null
+  }
+
+  await assertValidTransactionInput(db, { ...input, userId })
+
+  const updated: Transaction = {
+    ...transaction,
+    amount: Number(input.amount.toFixed(2)),
+    categoryId: input.categoryId,
+    description: input.description.trim(),
+    occurredOn: input.occurredOn,
+    type: input.type,
+    updatedAt: new Date().toISOString(),
+    syncStatus: 'pending',
+  }
+
+  await db.put('transactions', updated)
+
+  return updated
+}
+
+export async function deleteTransaction(id: string, userId: string) {
+  const db = await getDb()
+  const transaction = await db.get('transactions', id)
+
+  if (!transaction || transaction.userId !== userId || transaction.deletedAt) {
+    return null
+  }
+
+  const now = new Date().toISOString()
+  const deleted: Transaction = {
+    ...transaction,
+    deletedAt: now,
+    updatedAt: now,
+    syncStatus: 'pending',
+  }
+
+  await db.put('transactions', deleted)
+
+  return deleted
 }
 
 export async function addCategory(input: {
@@ -318,12 +408,13 @@ export async function getLocalImportSummary(): Promise<LocalImportSummary> {
   return {
     customCategories,
     hasData:
-      transactions.length > 0 ||
+      transactions.some((transaction) => !transaction.deletedAt) ||
       paymentDates.length > 0 ||
       customCategories > 0 ||
       hasCustomPreferences,
     paymentDates: paymentDates.length,
-    transactions: transactions.length,
+    transactions: transactions.filter((transaction) => !transaction.deletedAt)
+      .length,
   }
 }
 
@@ -389,6 +480,10 @@ export async function importLocalDataForUser(userId: string) {
   }
 
   for (const transaction of localTransactions) {
+    if (transaction.deletedAt) {
+      continue
+    }
+
     const categoryId =
       categoryIdMap.get(transaction.categoryId) ??
       fallbackCategoryByType.get(transaction.type)
@@ -439,7 +534,8 @@ export async function importLocalDataForUser(userId: string) {
 
   return {
     paymentDates: localPaymentDates.length,
-    transactions: localTransactions.length,
+    transactions: localTransactions.filter((transaction) => !transaction.deletedAt)
+      .length,
   }
 }
 

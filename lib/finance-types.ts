@@ -29,6 +29,7 @@ export interface Transaction {
   occurredOn: string
   createdAt: string
   updatedAt: string
+  deletedAt?: string
   syncStatus: SyncStatus
 }
 

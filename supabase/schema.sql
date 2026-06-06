@@ -80,6 +80,12 @@ create table if not exists public.payment_dates (
     on update cascade
 );
 
+alter table public.transactions
+  add column if not exists deleted_at timestamptz;
+
+alter table public.payment_dates
+  add column if not exists deleted_at timestamptz;
+
 create index if not exists categories_user_id_idx
   on public.categories(user_id)
   where archived_at is null;

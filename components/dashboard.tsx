@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { CalendarClock, ReceiptText, TrendingDown } from 'lucide-react'
 import ActionButtons from '@/components/action-buttons'
 import BalanceCard from '@/components/balance-card'
+import DeleteTransactionDialog from '@/components/delete-transaction-dialog'
 import type { SpendingChartPoint } from '@/components/spending-chart'
 import StatsCard from '@/components/stats-card'
 import TransactionList from '@/components/transaction-list'
@@ -53,20 +54,18 @@ export default function Dashboard() {
     addTransaction,
     categories,
     currency,
+    deleteTransaction,
     isLoading,
     paymentDates,
     transactions,
+    updateTransaction,
   } = useFinance()
   const [modalType, setModalType] = useState<TransactionType | null>(null)
-
-  const expenseCategories = useMemo(
-    () => categories.filter((category) => category.type === 'expense'),
-    [categories],
-  )
-  const incomeCategories = useMemo(
-    () => categories.filter((category) => category.type === 'income'),
-    [categories],
-  )
+  const [editingTransaction, setEditingTransaction] =
+    useState<Transaction | null>(null)
+  const [deletingTransaction, setDeletingTransaction] =
+    useState<Transaction | null>(null)
+  const [showAllTransactions, setShowAllTransactions] = useState(false)
 
   const balance = useMemo(
     () =>
@@ -128,19 +127,44 @@ export default function Dashboard() {
     categoryId: string
     description: string
     occurredOn: string
+    type: TransactionType
   }) => {
-    if (!modalType) {
+    if (!modalType && !editingTransaction) {
       return
     }
 
-    await addTransaction({
-      ...input,
-      type: modalType,
-    })
+    if (editingTransaction) {
+      await updateTransaction(editingTransaction.id, input)
+    } else {
+      await addTransaction(input)
+    }
+
+    setEditingTransaction(null)
     setModalType(null)
   }
 
-  const modalCategories = modalType === 'income' ? incomeCategories : expenseCategories
+  const closeTransactionModal = () => {
+    setEditingTransaction(null)
+    setModalType(null)
+  }
+
+  const openAddTransaction = (type: TransactionType) => {
+    setEditingTransaction(null)
+    setModalType(type)
+  }
+
+  const openEditTransaction = (transaction: Transaction) => {
+    setEditingTransaction(transaction)
+    setModalType(transaction.type)
+  }
+
+  const confirmDeleteTransaction = async () => {
+    if (!deletingTransaction) {
+      return
+    }
+
+    await deleteTransaction(deletingTransaction.id)
+  }
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
@@ -190,8 +214,8 @@ export default function Dashboard() {
       </div>
 
       <ActionButtons
-        onAddClick={() => setModalType('income')}
-        onExpenseClick={() => setModalType('expense')}
+        onAddClick={() => openAddTransaction('income')}
+        onExpenseClick={() => openAddTransaction('expense')}
       />
 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -220,23 +244,45 @@ export default function Dashboard() {
                 {isLoading ? 'Loading ledger' : `${transactions.length} saved`}
               </p>
             </div>
+            {transactions.length > 8 ? (
+              <button
+                className="text-sm font-medium text-primary hover:underline"
+                onClick={() => setShowAllTransactions((current) => !current)}
+                type="button"
+              >
+                {showAllTransactions ? 'Show recent' : 'View all'}
+              </button>
+            ) : null}
           </div>
 
           <TransactionList
             categories={categories}
             currency={currency}
-            transactions={transactions.slice(0, 8)}
+            onDelete={setDeletingTransaction}
+            onEdit={openEditTransaction}
+            transactions={
+              showAllTransactions ? transactions : transactions.slice(0, 8)
+            }
           />
         </section>
       </div>
 
       <TransactionModal
-        categories={modalCategories}
+        categories={categories}
+        initialTransaction={editingTransaction ?? undefined}
         isOpen={modalType !== null}
-        onClose={() => setModalType(null)}
+        key={editingTransaction?.id ?? modalType ?? 'closed'}
+        onClose={closeTransactionModal}
         onSubmit={handleModalSubmit}
         type={modalType ?? 'expense'}
       />
+      {deletingTransaction ? (
+        <DeleteTransactionDialog
+          onClose={() => setDeletingTransaction(null)}
+          onConfirm={confirmDeleteTransaction}
+          transaction={deletingTransaction}
+        />
+      ) : null}
     </section>
   )
 }
