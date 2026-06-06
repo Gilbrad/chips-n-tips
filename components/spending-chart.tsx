@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { formatCurrency } from '@/lib/format'
+import { formatCompactCurrency, formatCurrency } from '@/lib/format'
 
 export interface SpendingChartPoint {
   expense: number
@@ -25,26 +25,28 @@ export default function SpendingChart({
   data: SpendingChartPoint[]
 }) {
   return (
-    <div className="h-64 w-full">
-      <ResponsiveContainer height="100%" width="100%">
+    <div className="h-64 min-w-0 w-full overflow-hidden">
+      <ResponsiveContainer height="100%" minWidth={0} width="100%">
         <BarChart
           accessibilityLayer
           data={data}
-          margin={{ bottom: 0, left: 0, right: 8, top: 12 }}
+          margin={{ bottom: 0, left: -8, right: 0, top: 12 }}
         >
           <CartesianGrid stroke="var(--border)" strokeDasharray="4 4" vertical={false} />
           <XAxis
             axisLine={false}
             dataKey="label"
-            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
+            tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
             tickLine={false}
           />
           <YAxis
             axisLine={false}
-            tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }}
-            tickFormatter={(value) => formatCurrency(Number(value), currency)}
+            tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
+            tickFormatter={(value) =>
+              formatCompactCurrency(Number(value), currency)
+            }
             tickLine={false}
-            width={78}
+            width={58}
           />
           <Tooltip
             cursor={{ fill: 'color-mix(in oklch, var(--muted) 50%, transparent)' }}

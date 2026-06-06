@@ -231,8 +231,8 @@ export default function Dashboard() {
         onExpenseClick={() => openAddTransaction('expense')}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card p-4 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">
@@ -247,7 +247,7 @@ export default function Dashboard() {
           <SpendingChart currency={currency} data={chartData} />
         </section>
 
-        <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card p-4 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">

@@ -34,11 +34,11 @@ export default function TransactionList({
       {transactions.map((transaction) => (
         <div
           key={transaction.id}
-          className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:bg-muted/60"
+          className="grid min-w-0 gap-3 rounded-lg border border-border bg-background p-3 transition-colors hover:bg-muted/60 sm:flex sm:items-center sm:justify-between"
         >
-          <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3 sm:flex-1">
             <div
-              className={`rounded-lg p-2 ${
+              className={`shrink-0 rounded-lg p-2 ${
                 transaction.type === 'income'
                   ? 'bg-accent/10'
                   : 'bg-destructive/10'
@@ -56,19 +56,19 @@ export default function TransactionList({
                 />
               )}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-foreground truncate">
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium text-foreground">
                 {transaction.description}
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="truncate text-xs text-muted-foreground">
                 {categoryById.get(transaction.categoryId)?.name ?? 'Uncategorized'}
               </p>
             </div>
           </div>
-          <div className="ml-3 flex shrink-0 items-center gap-2">
-            <div className="text-right">
+          <div className="flex min-w-0 items-center justify-between gap-2 border-t border-border pt-3 sm:ml-3 sm:shrink-0 sm:border-0 sm:pt-0">
+            <div className="min-w-0 sm:text-right">
               <p
-                className={`font-bold text-sm ${
+                className={`break-all text-sm font-bold ${
                   transaction.type === 'income'
                     ? 'text-accent'
                     : 'text-destructive'
@@ -77,11 +77,11 @@ export default function TransactionList({
                 {transaction.type === 'income' ? '+' : '-'}
                 {formatCurrency(transaction.amount, currency)}
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground sm:whitespace-nowrap">
                 {formatDateLabel(transaction.occurredOn)}
               </p>
             </div>
-            <div className="flex gap-1">
+            <div className="flex shrink-0 gap-1">
               <button
                 aria-label={`Edit ${transaction.description}`}
                 className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
