@@ -209,10 +209,14 @@ export default function Dashboard() {
           <StatsCard
             description={
               upcomingPayment
-                ? formatDateRangeLabel(
+                ? `${formatDateRangeLabel(
                     upcomingPayment.dueOn,
                     upcomingPayment.dueEndOn,
-                  )
+                  )} | ${
+                    upcomingPayment.amount
+                      ? formatCurrency(upcomingPayment.amount, currency)
+                      : 'No amount set'
+                  }`
                 : 'No dates set'
             }
             icon={CalendarClock}
