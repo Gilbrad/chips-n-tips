@@ -23,6 +23,7 @@ import {
   deletePaymentDate as persistPaymentDateDelete,
   importLocalDataForUser as persistLocalDataImport,
   loadFinanceSnapshot,
+  loadRemoteSyncMetadata,
   togglePaymentDatePaid as persistPaymentDateToggle,
   updateTransaction as persistTransactionUpdate,
   updateCurrency as persistCurrency,
@@ -72,6 +73,7 @@ interface FinanceContextValue {
   deletePaymentDate: (id: string) => Promise<void>
   importLocalData: () => Promise<{ paymentDates: number; transactions: number }>
   isLoading: boolean
+  lastSyncedAt: string | null
   paymentDates: PaymentDate[]
   preferences: UserPreferences | null
   refresh: () => Promise<void>
@@ -138,9 +140,11 @@ function FinanceSessionProvider({
   const [preferences, setPreferences] = useState<UserPreferences | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
   const [syncState, setSyncState] = useState<SyncState>(
     user ? 'offline' : 'local',
   )
+  const isSignedIn = Boolean(user)
   const queuedSyncAfterCurrent = useRef(false)
   const queuedSyncTimeout = useRef<number | null>(null)
   const syncInFlight = useRef<Promise<boolean> | null>(null)
@@ -186,6 +190,8 @@ function FinanceSessionProvider({
         setPaymentDates(sortPaymentDates(snapshot.paymentDates))
         setPreferences(snapshot.preferences)
         setTransactions(sortTransactions(snapshot.transactions))
+        const syncMetadata = await loadRemoteSyncMetadata(userId)
+        setLastSyncedAt(syncMetadata?.updatedAt ?? null)
         setSyncState('synced')
 
         return true
@@ -258,6 +264,17 @@ function FinanceSessionProvider({
           setPaymentDates(sortPaymentDates(snapshot.paymentDates))
           setPreferences(snapshot.preferences)
           setTransactions(sortTransactions(snapshot.transactions))
+
+          if (isSignedIn) {
+            return loadRemoteSyncMetadata(userId)
+          }
+        })
+        .then((syncMetadata) => {
+          if (!active || !isSignedIn) {
+            return
+          }
+
+          setLastSyncedAt(syncMetadata?.updatedAt ?? null)
         })
         .finally(() => {
           if (active) {
@@ -270,7 +287,7 @@ function FinanceSessionProvider({
       active = false
       window.clearTimeout(timeoutId)
     }
-  }, [userId])
+  }, [isSignedIn, userId])
 
   useEffect(() => {
     if (!user) {
@@ -449,6 +466,7 @@ function FinanceSessionProvider({
       deletePaymentDate,
       importLocalData,
       isLoading,
+      lastSyncedAt,
       paymentDates,
       preferences,
       refresh,
@@ -470,6 +488,7 @@ function FinanceSessionProvider({
       deletePaymentDate,
       importLocalData,
       isLoading,
+      lastSyncedAt,
       paymentDates,
       preferences,
       refresh,

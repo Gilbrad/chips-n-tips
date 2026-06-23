@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   CalendarDays,
   ChartNoAxesCombined,
@@ -26,13 +26,76 @@ import {
 } from '@/lib/payment-reminders'
 import { disableRemotePaymentReminders } from '@/lib/push-notifications'
 import { cn } from '@/lib/utils'
+import type { SyncState } from '@/components/finance-provider'
+
+function formatRelativeSyncTime(dateValue: string, now: number) {
+  const syncedAt = new Date(dateValue).getTime()
+
+  if (!Number.isFinite(syncedAt)) {
+    return null
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((now - syncedAt) / 1000))
+
+  if (elapsedSeconds < 45) {
+    return 'just now'
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} min${elapsedMinutes === 1 ? '' : 's'} ago`
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60)
+
+  if (elapsedHours < 24) {
+    return `${elapsedHours} hr${elapsedHours === 1 ? '' : 's'} ago`
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24)
+
+  if (elapsedDays === 1) {
+    return 'yesterday'
+  }
+
+  return `${elapsedDays} days ago`
+}
+
+function getBackupStatusLabel(
+  syncState: SyncState,
+  lastSyncedAt: string | null,
+  now: number | null,
+) {
+  const relativeTime =
+    lastSyncedAt && now ? formatRelativeSyncTime(lastSyncedAt, now) : null
+
+  if (syncState === 'syncing') {
+    return 'Syncing'
+  }
+
+  if (syncState === 'synced') {
+    return relativeTime ? `Synced ${relativeTime}` : 'Synced'
+  }
+
+  if (syncState === 'offline') {
+    return relativeTime ? `Offline. Synced ${relativeTime}` : 'Offline'
+  }
+
+  if (syncState === 'error') {
+    return relativeTime ? `Error. Synced ${relativeTime}` : 'Error'
+  }
+
+  return 'Local only'
+}
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
   const { isConfigured, isLoading: isAuthLoading, signOut, user } = useAuth()
-  const { currency, syncState } = useFinance()
+  const { currency, lastSyncedAt, syncState } = useFinance()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [currentTime, setCurrentTime] = useState<number | null>(null)
 
   const navItems = useMemo(
     () => [
@@ -45,6 +108,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
     [],
   )
   const mobileNavItems = navItems.filter(({ href }) => href !== '/currency')
+  const backupStatusLabel = getBackupStatusLabel(
+    syncState,
+    lastSyncedAt,
+    currentTime,
+  )
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    const updateCurrentTime = () => setCurrentTime(Date.now())
+    updateCurrentTime()
+
+    const intervalId = window.setInterval(updateCurrentTime, 60 * 1000)
+
+    return () => window.clearInterval(intervalId)
+  }, [user])
 
   const handleAuthAction = async () => {
     setIsMobileMenuOpen(false)
@@ -119,8 +200,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 Currency: {currency}
               </p>
               {user ? (
-                <p className="mt-1 text-xs capitalize text-muted-foreground">
-                  Backup: {syncState}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Backup: {backupStatusLabel}
                 </p>
               ) : null}
             </div>
@@ -171,9 +252,26 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 type="button"
               />
               <div
-                className="absolute bottom-full right-3 z-10 mb-2 w-56 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                className="absolute bottom-full right-3 z-10 mb-2 w-64 rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg"
                 id="mobile-more-menu"
               >
+                <div className="mb-2 rounded-lg border border-border bg-card p-3 text-card-foreground">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Session
+                  </p>
+                  <p className="mt-2 truncate text-sm font-medium">
+                    {user?.email ?? (isConfigured ? 'Signed out' : 'Offline mode')}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Currency: {currency}
+                  </p>
+                  {user ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Backup: {backupStatusLabel}
+                    </p>
+                  ) : null}
+                </div>
+
                 <Link
                   className={cn(
                     'flex h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors',
