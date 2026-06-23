@@ -8,9 +8,11 @@ import { useFinance } from '@/components/finance-provider'
 import {
   getPaymentReminderPermission,
   getPaymentReminderPreferenceSnapshot,
+  getRemotePaymentReminderPreferenceSnapshot,
   PAYMENT_REMINDER_DAYS,
   requestPaymentReminderPermission,
   setPaymentReminderPreference,
+  setRemotePaymentReminderPreference,
   subscribePaymentReminderPreference,
   type PaymentReminderPermission,
 } from '@/lib/payment-reminders'
@@ -40,10 +42,10 @@ function getStatusText(
   }
 
   if (remotePushAvailable) {
-    return 'Push on this device'
+    return 'On for this device'
   }
 
-  return signedIn ? 'Local fallback' : 'Local only'
+  return signedIn ? 'On while the app is open' : 'On this device'
 }
 
 export default function PaymentReminderSettings() {
@@ -61,6 +63,12 @@ export default function PaymentReminderSettings() {
       () => getPaymentReminderPreferenceSnapshot(userId),
       () => 'false',
     ) === 'true'
+  const remoteRemindersEnabled =
+    useSyncExternalStore(
+      subscribePaymentReminderPreference,
+      () => getRemotePaymentReminderPreferenceSnapshot(userId),
+      () => 'false',
+    ) === 'true'
   const activePaymentCount = paymentDates.filter(
     (paymentDate) => !paymentDate.deletedAt && !paymentDate.paidAt,
   ).length
@@ -68,6 +76,7 @@ export default function PaymentReminderSettings() {
     permission === 'unsupported' || permission === 'denied'
   const remotePushAvailable =
     hasHydrated && Boolean(user) && canUseSupabasePushReminders()
+  const remindersUseRemotePush = remindersEnabled && remoteRemindersEnabled
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -88,6 +97,7 @@ export default function PaymentReminderSettings() {
           await disableRemotePaymentReminders(user.id)
         }
 
+        setRemotePaymentReminderPreference(userId, false)
         setPaymentReminderPreference(userId, false)
         return
       }
@@ -104,12 +114,23 @@ export default function PaymentReminderSettings() {
       }
 
       if (user && remotePushAvailable) {
-        await enableRemotePaymentReminders(user.id)
+        try {
+          await enableRemotePaymentReminders(user.id)
+          setRemotePaymentReminderPreference(userId, true)
+        } catch {
+          setRemotePaymentReminderPreference(userId, false)
+          setPaymentReminderPreference(userId, true)
+          setError(
+            'Reminders are on while the app is open. This device could not enable background reminders.',
+          )
+          return
+        }
+      } else {
+        setRemotePaymentReminderPreference(userId, false)
       }
 
       setPaymentReminderPreference(userId, true)
     } catch (caughtError) {
-      console.error('Could not save reminder settings.', caughtError)
       setError(getPushReminderErrorMessage(caughtError))
     } finally {
       setIsSaving(false)
@@ -125,7 +146,7 @@ export default function PaymentReminderSettings() {
             {getStatusText(
               permission,
               remindersEnabled,
-              remotePushAvailable,
+              remindersUseRemotePush,
               Boolean(user),
             )}
           </p>

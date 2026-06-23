@@ -7,6 +7,7 @@ import {
   getPaymentReminderPermission,
   getPaymentReminderPreferenceSnapshot,
   getPendingPaymentReminders,
+  getRemotePaymentReminderPreferenceSnapshot,
   getUnsentPaymentReminders,
   markPaymentReminderSent,
   showPaymentReminderNotification,
@@ -23,13 +24,19 @@ export default function PaymentReminderNotifications() {
       () => getPaymentReminderPreferenceSnapshot(userId),
       () => 'false',
     ) === 'true'
+  const remoteRemindersEnabled =
+    useSyncExternalStore(
+      subscribePaymentReminderPreference,
+      () => getRemotePaymentReminderPreferenceSnapshot(userId),
+      () => 'false',
+    ) === 'true'
 
   useEffect(() => {
     if (!remindersEnabled || getPaymentReminderPermission() !== 'granted') {
       return
     }
 
-    if (user && canUseSupabasePushReminders()) {
+    if (user && remoteRemindersEnabled && canUseSupabasePushReminders()) {
       return
     }
 
@@ -74,7 +81,14 @@ export default function PaymentReminderNotifications() {
       window.removeEventListener('focus', runCheck)
       document.removeEventListener('visibilitychange', runWhenVisible)
     }
-  }, [currency, paymentDates, remindersEnabled, user, userId])
+  }, [
+    currency,
+    paymentDates,
+    remindersEnabled,
+    remoteRemindersEnabled,
+    user,
+    userId,
+  ])
 
   return null
 }

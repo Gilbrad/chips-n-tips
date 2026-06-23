@@ -138,7 +138,7 @@ export function getPushReminderErrorMessage(error: unknown) {
   const lowerMessage = message.toLowerCase()
 
   if (lowerMessage.includes('upsert_push_subscription')) {
-    return 'Reminder database setup is missing. Re-run supabase/schema.sql, then redeploy.'
+    return 'Reminders are not ready yet. Please try again later.'
   }
 
   if (
@@ -147,7 +147,7 @@ export function getPushReminderErrorMessage(error: unknown) {
     lowerMessage.includes('relation') ||
     lowerMessage.includes('table')
   ) {
-    return 'Reminder database tables are missing. Re-run supabase/schema.sql in Supabase.'
+    return 'Reminders are not ready yet. Please try again later.'
   }
 
   if (
@@ -156,21 +156,21 @@ export function getPushReminderErrorMessage(error: unknown) {
     lowerMessage.includes('invalid character') ||
     lowerMessage.includes('public key')
   ) {
-    return 'The deployed VAPID public key is missing or invalid. Check NEXT_PUBLIC_VAPID_PUBLIC_KEY.'
+    return 'Reminders are not ready yet. Please try again later.'
   }
 
   if (
     lowerMessage.includes('push service error') ||
     lowerMessage.includes('registration failed')
   ) {
-    return 'The browser push service rejected registration. Check that the deployed NEXT_PUBLIC_VAPID_PUBLIC_KEY is the generated public key, then try another browser/network if it still fails.'
+    return 'This device could not turn on reminders. Check notification permissions, then try another browser or network.'
   }
 
   if (
     lowerMessage.includes('service worker') ||
     lowerMessage.includes('not supported')
   ) {
-    return 'Push is not ready in this browser yet. Refresh after the app finishes installing, then try again.'
+    return 'Reminders are still getting ready. Refresh the app, then try again.'
   }
 
   if (
@@ -178,10 +178,10 @@ export function getPushReminderErrorMessage(error: unknown) {
     lowerMessage.includes('permission denied') ||
     lowerMessage.includes('unauthorized')
   ) {
-    return 'Supabase rejected the subscription save. Make sure you are signed in and the latest schema policies are applied.'
+    return 'Please sign in again, then try turning on reminders.'
   }
 
-  return message || 'Could not save reminder settings. Please try again.'
+  return 'Could not turn on reminders right now. Please try again.'
 }
 
 async function revokeRemotePushSubscription(
