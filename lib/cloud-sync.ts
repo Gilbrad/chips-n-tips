@@ -5,13 +5,16 @@ import type {
   Category,
   FinanceSnapshot,
   PaymentDate,
+  RemoteFinanceSnapshot,
   Transaction,
   UserPreferences,
 } from '@/lib/finance-types'
 import {
+  loadRemoteSyncMetadata,
   loadSyncSnapshot,
   markFinanceSnapshotSynced,
   mergeRemoteFinanceSnapshot,
+  saveRemoteSyncMetadata,
 } from '@/lib/offline-db'
 import {
   createClient,
@@ -39,7 +42,7 @@ interface TransactionRow {
   deleted_at: string | null
   description: string
   id: string
-  occurred_on: string
+  occurred_on: string | null
   type: Transaction['type']
   updated_at: string
   user_id: string
@@ -49,6 +52,7 @@ interface PaymentDateRow {
   amount: number | string | null
   category_id: string | null
   created_at: string
+  deleted_at: string | null
   due_end_on: string | null
   due_on: string
   id: string
@@ -73,16 +77,54 @@ type SyncTable =
   | 'transactions'
   | 'user_preferences'
 
-async function fetchAllRows(table: SyncTable, userId: string) {
+interface RemoteSyncWatermarks {
+  categoryUpdatedAt?: string
+  paymentDateUpdatedAt?: string
+  preferenceUpdatedAt?: string
+  transactionUpdatedAt?: string
+}
+
+function toStoredDate(value: string | null | undefined, fallback: string) {
+  const candidate = value || fallback
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(candidate)) {
+    return candidate.slice(0, 10)
+  }
+
+  return new Date().toISOString().slice(0, 10)
+}
+
+function maxUpdatedAt(rows: Array<{ updated_at: string }>) {
+  return rows.reduce<string | undefined>((latest, row) => {
+    if (!latest || row.updated_at > latest) {
+      return row.updated_at
+    }
+
+    return latest
+  }, undefined)
+}
+
+async function fetchUpdatedRows(
+  table: SyncTable,
+  userId: string,
+  updatedSince?: string,
+) {
   const supabase = createClient()
   const rows: unknown[] = []
   let from = 0
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(table)
       .select('*')
       .eq('user_id', userId)
+      .order('updated_at', { ascending: true })
+
+    if (updatedSince) {
+      query = query.gte('updated_at', updatedSince)
+    }
+
+    const { data, error } = await query
       .range(from, from + PAGE_SIZE - 1)
 
     if (error) {
@@ -123,7 +165,7 @@ function transactionFromRow(row: TransactionRow): Transaction {
     deletedAt: row.deleted_at ?? undefined,
     description: row.description,
     id: row.id,
-    occurredOn: row.occurred_on,
+    occurredOn: toStoredDate(row.occurred_on, row.created_at),
     syncStatus: 'synced',
     type: row.type,
     updatedAt: row.updated_at,
@@ -136,6 +178,7 @@ function paymentDateFromRow(row: PaymentDateRow): PaymentDate {
     amount: row.amount === null ? undefined : Number(row.amount),
     categoryId: row.category_id ?? undefined,
     createdAt: row.created_at,
+    deletedAt: row.deleted_at ?? undefined,
     dueEndOn: row.due_end_on ?? undefined,
     dueOn: row.due_on,
     id: row.id,
@@ -169,23 +212,52 @@ function preferencesFromRow(
   }
 }
 
-async function loadRemoteSnapshot(userId: string): Promise<FinanceSnapshot> {
+async function loadRemoteSnapshot(
+  userId: string,
+  watermarks: RemoteSyncWatermarks,
+): Promise<{
+  nextWatermarks: RemoteSyncWatermarks
+  snapshot: RemoteFinanceSnapshot
+}> {
   const [categoryRows, paymentDateRows, preferencesRows, transactionRows] =
     await Promise.all([
-      fetchAllRows('categories', userId),
-      fetchAllRows('payment_dates', userId),
-      fetchAllRows('user_preferences', userId),
-      fetchAllRows('transactions', userId),
+      fetchUpdatedRows('categories', userId, watermarks.categoryUpdatedAt),
+      fetchUpdatedRows(
+        'payment_dates',
+        userId,
+        watermarks.paymentDateUpdatedAt,
+      ),
+      fetchUpdatedRows(
+        'user_preferences',
+        userId,
+        watermarks.preferenceUpdatedAt,
+      ),
+      fetchUpdatedRows('transactions', userId, watermarks.transactionUpdatedAt),
     ])
+  const typedCategoryRows = categoryRows as CategoryRow[]
+  const typedPaymentDateRows = paymentDateRows as PaymentDateRow[]
+  const typedPreferencesRows = preferencesRows as PreferencesRow[]
+  const typedTransactionRows = transactionRows as TransactionRow[]
 
   return {
-    categories: (categoryRows as CategoryRow[]).map(categoryFromRow),
-    paymentDates: (paymentDateRows as PaymentDateRow[]).map(paymentDateFromRow),
-    preferences: preferencesFromRow(
-      (preferencesRows as PreferencesRow[])[0],
-      userId,
-    ),
-    transactions: (transactionRows as TransactionRow[]).map(transactionFromRow),
+    nextWatermarks: {
+      categoryUpdatedAt:
+        maxUpdatedAt(typedCategoryRows) ?? watermarks.categoryUpdatedAt,
+      paymentDateUpdatedAt:
+        maxUpdatedAt(typedPaymentDateRows) ?? watermarks.paymentDateUpdatedAt,
+      preferenceUpdatedAt:
+        maxUpdatedAt(typedPreferencesRows) ?? watermarks.preferenceUpdatedAt,
+      transactionUpdatedAt:
+        maxUpdatedAt(typedTransactionRows) ?? watermarks.transactionUpdatedAt,
+    },
+    snapshot: {
+      categories: typedCategoryRows.map(categoryFromRow),
+      paymentDates: typedPaymentDateRows.map(paymentDateFromRow),
+      preferences: typedPreferencesRows[0]
+        ? preferencesFromRow(typedPreferencesRows[0], userId)
+        : undefined,
+      transactions: typedTransactionRows.map(transactionFromRow),
+    },
   }
 }
 
@@ -223,6 +295,7 @@ function paymentDateToRow(paymentDate: PaymentDate): PaymentDateRow {
     amount: paymentDate.amount ?? null,
     category_id: paymentDate.categoryId ?? null,
     created_at: paymentDate.createdAt,
+    deleted_at: paymentDate.deletedAt ?? null,
     due_end_on: paymentDate.dueEndOn ?? null,
     due_on: paymentDate.dueOn,
     id: paymentDate.id,
@@ -304,12 +377,20 @@ export async function syncUserFinance(userId: string) {
     return false
   }
 
-  const remote = await loadRemoteSnapshot(userId)
-  await mergeRemoteFinanceSnapshot(userId, remote)
+  const metadata = await loadRemoteSyncMetadata(userId)
+  const remote = await loadRemoteSnapshot(userId, {
+    categoryUpdatedAt: metadata?.categoryUpdatedAt,
+    paymentDateUpdatedAt: metadata?.paymentDateUpdatedAt,
+    preferenceUpdatedAt: metadata?.preferenceUpdatedAt,
+    transactionUpdatedAt: metadata?.transactionUpdatedAt,
+  })
+
+  await mergeRemoteFinanceSnapshot(userId, remote.snapshot)
 
   const pendingSnapshot = await loadSyncSnapshot(userId)
   await pushPendingSnapshot(pendingSnapshot)
   await markFinanceSnapshotSynced(pendingSnapshot)
+  await saveRemoteSyncMetadata(userId, remote.nextWatermarks)
 
   return true
 }

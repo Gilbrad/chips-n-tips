@@ -20,6 +20,7 @@ import {
   addTransaction as persistTransaction,
   archiveCategory as persistCategoryArchive,
   deleteTransaction as persistTransactionDelete,
+  deletePaymentDate as persistPaymentDateDelete,
   importLocalDataForUser as persistLocalDataImport,
   loadFinanceSnapshot,
   togglePaymentDatePaid as persistPaymentDateToggle,
@@ -68,6 +69,7 @@ interface FinanceContextValue {
   categories: Category[]
   currency: string
   deleteTransaction: (id: string) => Promise<void>
+  deletePaymentDate: (id: string) => Promise<void>
   importLocalData: () => Promise<{ paymentDates: number; transactions: number }>
   isLoading: boolean
   paymentDates: PaymentDate[]
@@ -139,6 +141,8 @@ function FinanceSessionProvider({
   const [syncState, setSyncState] = useState<SyncState>(
     user ? 'offline' : 'local',
   )
+  const queuedSyncAfterCurrent = useRef(false)
+  const queuedSyncTimeout = useRef<number | null>(null)
   const syncInFlight = useRef<Promise<boolean> | null>(null)
 
   const refresh = useCallback(async () => {
@@ -166,7 +170,7 @@ function FinanceSessionProvider({
       return syncInFlight.current
     }
 
-    const syncPromise = (async () => {
+    const runSyncOnce = async () => {
       setSyncState('syncing')
 
       try {
@@ -188,6 +192,19 @@ function FinanceSessionProvider({
       } catch {
         setSyncState('error')
         return false
+      }
+    }
+
+    const syncPromise = (async () => {
+      let latestResult = false
+
+      try {
+        do {
+          queuedSyncAfterCurrent.current = false
+          latestResult = await runSyncOnce()
+        } while (queuedSyncAfterCurrent.current)
+
+        return latestResult
       } finally {
         syncInFlight.current = null
       }
@@ -202,10 +219,29 @@ function FinanceSessionProvider({
       return
     }
 
-    window.setTimeout(() => {
+    if (queuedSyncTimeout.current) {
+      window.clearTimeout(queuedSyncTimeout.current)
+    }
+
+    queuedSyncTimeout.current = window.setTimeout(() => {
+      queuedSyncTimeout.current = null
+
+      if (syncInFlight.current) {
+        queuedSyncAfterCurrent.current = true
+        return
+      }
+
       void syncNow()
-    }, 250)
+    }, 1500)
   }, [syncNow, user])
+
+  useEffect(() => {
+    return () => {
+      if (queuedSyncTimeout.current) {
+        window.clearTimeout(queuedSyncTimeout.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -309,6 +345,22 @@ function FinanceSessionProvider({
     [queueCloudBackup, userId],
   )
 
+  const deletePaymentDate = useCallback(
+    async (id: string) => {
+      const paymentDate = await persistPaymentDateDelete(id, userId)
+
+      if (!paymentDate) {
+        return
+      }
+
+      setPaymentDates((current) =>
+        current.filter((item) => item.id !== paymentDate.id),
+      )
+      queueCloudBackup()
+    },
+    [queueCloudBackup, userId],
+  )
+
   const addCategory = useCallback(
     async (input: CategoryInput) => {
       const category = await persistCategory({ ...input, userId })
@@ -346,7 +398,7 @@ function FinanceSessionProvider({
 
   const togglePaymentDatePaid = useCallback(
     async (id: string) => {
-      const updated = await persistPaymentDateToggle(id)
+      const updated = await persistPaymentDateToggle(id, userId)
 
       if (!updated) {
         return
@@ -361,7 +413,7 @@ function FinanceSessionProvider({
       )
       queueCloudBackup()
     },
-    [queueCloudBackup],
+    [queueCloudBackup, userId],
   )
 
   const setCurrency = useCallback(
@@ -394,6 +446,7 @@ function FinanceSessionProvider({
       categories,
       currency: preferences?.currency ?? DEFAULT_CURRENCY,
       deleteTransaction,
+      deletePaymentDate,
       importLocalData,
       isLoading,
       paymentDates,
@@ -414,6 +467,7 @@ function FinanceSessionProvider({
       archiveCategory,
       categories,
       deleteTransaction,
+      deletePaymentDate,
       importLocalData,
       isLoading,
       paymentDates,

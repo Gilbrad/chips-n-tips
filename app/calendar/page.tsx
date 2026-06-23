@@ -1,7 +1,15 @@
 'use client'
 
 import { useMemo, useState, type FormEvent } from 'react'
-import { CheckCircle2, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Trash2,
+} from 'lucide-react'
+import PaymentReminderSettings from '@/components/payment-reminder-settings'
 import { Button } from '@/components/ui/button'
 import { useFinance } from '@/components/finance-provider'
 import {
@@ -17,11 +25,14 @@ import {
 } from '@/lib/format'
 import type { PaymentDate, Recurrence } from '@/lib/finance-types'
 
+type DateMode = 'specific' | 'range'
+
 export default function CalendarPage() {
   const {
     addPaymentDate,
     categories,
     currency,
+    deletePaymentDate,
     paymentDates,
     togglePaymentDatePaid,
     transactions,
@@ -31,6 +42,7 @@ export default function CalendarPage() {
     new Date(now.getFullYear(), now.getMonth(), 1),
   )
   const [selectedDate, setSelectedDate] = useState(toDateInputValue())
+  const [dateMode, setDateMode] = useState<DateMode>('specific')
   const [rangeEndDate, setRangeEndDate] = useState('')
   const [title, setTitle] = useState('')
   const [amount, setAmount] = useState('')
@@ -39,6 +51,9 @@ export default function CalendarPage() {
   const [notes, setNotes] = useState('')
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [paymentDateToDelete, setPaymentDateToDelete] =
+    useState<PaymentDate | null>(null)
+  const [isDeletingPaymentDate, setIsDeletingPaymentDate] = useState(false)
 
   const year = visibleMonth.getFullYear()
   const month = visibleMonth.getMonth()
@@ -107,13 +122,24 @@ export default function CalendarPage() {
     }
   }
 
+  const selectDateMode = (mode: DateMode) => {
+    setDateMode(mode)
+
+    if (mode === 'specific') {
+      setRangeEndDate('')
+    }
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     const trimmedTitle = title.trim()
 
-    if (!trimmedTitle || (rangeEndDate && rangeEndDate < selectedDate)) {
-      setError('Enter a title and make sure the end date follows the start date.')
+    if (
+      !trimmedTitle ||
+      (dateMode === 'range' && (!rangeEndDate || rangeEndDate < selectedDate))
+    ) {
+      setError('Enter a title and make sure the date range is valid.')
       return
     }
 
@@ -124,7 +150,7 @@ export default function CalendarPage() {
       await addPaymentDate({
         amount: amount ? Number(amount) : undefined,
         categoryId: categoryId || undefined,
-        dueEndOn: rangeEndDate || undefined,
+        dueEndOn: dateMode === 'range' ? rangeEndDate : undefined,
         dueOn: selectedDate,
         notes: notes.trim() || undefined,
         recurrence,
@@ -139,6 +165,24 @@ export default function CalendarPage() {
       setError('Could not save this date. Please check the details and try again.')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleDeletePaymentDate = async () => {
+    if (!paymentDateToDelete) {
+      return
+    }
+
+    setIsDeletingPaymentDate(true)
+    setError('')
+
+    try {
+      await deletePaymentDate(paymentDateToDelete.id)
+      setPaymentDateToDelete(null)
+    } catch {
+      setError('Could not delete this calendar item. Please try again.')
+    } finally {
+      setIsDeletingPaymentDate(false)
     }
   }
 
@@ -256,9 +300,29 @@ export default function CalendarPage() {
                 type="text"
                 value={title}
               />
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/50 p-1">
+                {(['specific', 'range'] as DateMode[]).map((mode) => (
+                  <button
+                    className={`h-10 rounded-md text-sm font-medium transition ${
+                      dateMode === mode
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    key={mode}
+                    onClick={() => selectDateMode(mode)}
+                    type="button"
+                  >
+                    {mode === 'specific' ? 'Specific date' : 'Date range'}
+                  </button>
+                ))}
+              </div>
+              <div
+                className={`grid gap-3 ${
+                  dateMode === 'range' ? 'sm:grid-cols-2' : ''
+                }`}
+              >
                 <label className="grid gap-1.5 text-sm font-medium text-foreground">
-                  Start date
+                  {dateMode === 'range' ? 'Start date' : 'Date'}
                   <input
                     className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     onChange={(event) =>
@@ -269,16 +333,19 @@ export default function CalendarPage() {
                     value={selectedDate}
                   />
                 </label>
-                <label className="grid gap-1.5 text-sm font-medium text-foreground">
-                  Estimated end
-                  <input
-                    className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    min={selectedDate}
-                    onChange={(event) => setRangeEndDate(event.target.value)}
-                    type="date"
-                    value={rangeEndDate}
-                  />
-                </label>
+                {dateMode === 'range' ? (
+                  <label className="grid gap-1.5 text-sm font-medium text-foreground">
+                    End date
+                    <input
+                      className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      min={selectedDate}
+                      onChange={(event) => setRangeEndDate(event.target.value)}
+                      required
+                      type="date"
+                      value={rangeEndDate}
+                    />
+                  </label>
+                ) : null}
               </div>
               <input
                 className="w-full rounded-lg border border-border bg-background px-3 py-3 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -333,6 +400,8 @@ export default function CalendarPage() {
             </form>
           </section>
 
+          <PaymentReminderSettings />
+
           <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
             <div className="mb-3">
               <h2 className="text-lg font-semibold">
@@ -372,26 +441,39 @@ export default function CalendarPage() {
                           )}
                         </p>
                       </div>
-                      <Button
-                        aria-label={
-                          paymentDate.paidAt
-                            ? 'Mark item pending'
-                            : 'Mark item complete'
-                        }
-                        onClick={() =>
-                          void togglePaymentDatePaid(paymentDate.id)
-                        }
-                        size="icon"
-                        title={
-                          paymentDate.paidAt
-                            ? 'Mark item pending'
-                            : 'Mark item complete'
-                        }
-                        type="button"
-                        variant={paymentDate.paidAt ? 'default' : 'outline'}
-                      >
-                        <CheckCircle2 size={16} />
-                      </Button>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          aria-label={
+                            paymentDate.paidAt
+                              ? 'Mark item pending'
+                              : 'Mark item complete'
+                          }
+                          onClick={() =>
+                            void togglePaymentDatePaid(paymentDate.id)
+                          }
+                          size="icon"
+                          title={
+                            paymentDate.paidAt
+                              ? 'Mark item pending'
+                              : 'Mark item complete'
+                          }
+                          type="button"
+                          variant={paymentDate.paidAt ? 'default' : 'outline'}
+                        >
+                          <CheckCircle2 size={16} />
+                        </Button>
+                        <Button
+                          aria-label={`Delete ${paymentDate.title}`}
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => setPaymentDateToDelete(paymentDate)}
+                          size="icon"
+                          title="Delete calendar item"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Trash2 size={16} />
+                        </Button>
+                      </div>
                     </div>
                     {paymentDate.notes ? (
                       <p className="mt-2 text-xs text-muted-foreground">
@@ -405,6 +487,46 @@ export default function CalendarPage() {
           </section>
         </aside>
       </div>
+
+      {paymentDateToDelete ? (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/45 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4">
+          <section className="w-full bg-card p-5 text-card-foreground shadow-xl sm:max-w-md sm:rounded-lg sm:border sm:border-border">
+            <div className="flex items-start gap-3">
+              <div className="rounded-lg bg-destructive/10 p-2 text-destructive">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold">Delete calendar item?</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {paymentDateToDelete.title} will be removed from this calendar
+                  and synced as deleted on your other devices.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <Button
+                className="flex-1"
+                disabled={isDeletingPaymentDate}
+                onClick={() => setPaymentDateToDelete(null)}
+                type="button"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={isDeletingPaymentDate}
+                onClick={() => void handleDeletePaymentDate()}
+                type="button"
+                variant="destructive"
+              >
+                {isDeletingPaymentDate ? 'Deleting' : 'Delete'}
+              </Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   )
 }

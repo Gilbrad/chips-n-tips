@@ -19,6 +19,9 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/components/auth-provider'
 import { useFinance } from '@/components/finance-provider'
 import LocalDataImportPrompt from '@/components/local-data-import-prompt'
+import PaymentReminderNotifications from '@/components/payment-reminder-notifications'
+import { setPaymentReminderPreference } from '@/lib/payment-reminders'
+import { disableRemotePaymentReminders } from '@/lib/push-notifications'
 import { cn } from '@/lib/utils'
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -48,6 +51,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       return
     }
 
+    await disableRemotePaymentReminders(user.id)
+    setPaymentReminderPreference(user.id, false)
     await signOut()
     router.push('/login')
   }
@@ -71,7 +76,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Finance
+                  Your personal Wallet
                 </p>
                 <p className="text-lg font-semibold">Chips n&apos; Tips</p>
               </div>
@@ -258,6 +263,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </nav>
       </div>
       <LocalDataImportPrompt key={user?.id ?? 'signed-out'} />
+      <PaymentReminderNotifications />
     </div>
   )
 }

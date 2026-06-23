@@ -1,10 +1,19 @@
-import { DEFAULT_CURRENCY, SUPPORTED_CURRENCIES } from '@/lib/defaults'
+import {
+  getCurrencyDisplayName,
+  isValidCurrencyCode,
+  normalizeCurrencyCode,
+} from '@/lib/currencies'
+import { DEFAULT_CURRENCY } from '@/lib/defaults'
 
 export function getCurrencyMeta(currencyCode: string) {
-  return (
-    SUPPORTED_CURRENCIES.find((currency) => currency.code === currencyCode) ??
-    SUPPORTED_CURRENCIES.find((currency) => currency.code === DEFAULT_CURRENCY)!
-  )
+  const code = normalizeCurrencyCode(currencyCode)
+  const safeCode = isValidCurrencyCode(code) ? code : DEFAULT_CURRENCY
+
+  return {
+    code: safeCode,
+    label: getCurrencyDisplayName(safeCode),
+    locale: 'en-US',
+  }
 }
 
 export function formatCurrency(amount: number, currencyCode: string): string {
@@ -12,8 +21,6 @@ export function formatCurrency(amount: number, currencyCode: string): string {
 
   return new Intl.NumberFormat(currency.locale, {
     currency: currency.code,
-    maximumFractionDigits: currency.code === 'JPY' ? 0 : 2,
-    minimumFractionDigits: currency.code === 'JPY' ? 0 : 2,
     style: 'currency',
   }).format(amount)
 }

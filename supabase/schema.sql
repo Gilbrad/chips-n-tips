@@ -83,6 +83,33 @@ create table if not exists public.payment_dates (
     on update cascade
 );
 
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  user_agent text,
+  timezone text not null default 'UTC' check (char_length(trim(timezone)) between 1 and 80),
+  revoked_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.payment_reminder_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  subscription_id uuid not null references public.push_subscriptions(id) on delete cascade,
+  payment_date_id uuid not null references public.payment_dates(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  due_on date not null,
+  days_before integer not null check (days_before in (1, 3, 5)),
+  status text not null default 'sending' check (status in ('sending', 'sent', 'failed')),
+  error text,
+  sent_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.transactions
   add column if not exists deleted_at timestamptz;
 
@@ -91,6 +118,12 @@ alter table public.payment_dates
 
 alter table public.payment_dates
   add column if not exists due_end_on date;
+
+alter table public.push_subscriptions
+  add column if not exists timezone text not null default 'UTC';
+
+alter table public.push_subscriptions
+  add column if not exists revoked_at timestamptz;
 
 do $$
 begin
@@ -106,6 +139,9 @@ create index if not exists categories_user_id_idx
   on public.categories(user_id)
   where archived_at is null;
 
+create index if not exists categories_user_updated_at_idx
+  on public.categories(user_id, updated_at);
+
 create index if not exists transactions_user_occurred_on_idx
   on public.transactions(user_id, occurred_on desc)
   where deleted_at is null;
@@ -114,9 +150,37 @@ create index if not exists transactions_user_type_idx
   on public.transactions(user_id, type)
   where deleted_at is null;
 
+create index if not exists transactions_user_updated_at_idx
+  on public.transactions(user_id, updated_at);
+
 create index if not exists payment_dates_user_due_on_idx
   on public.payment_dates(user_id, due_on)
   where deleted_at is null;
+
+create index if not exists payment_dates_user_updated_at_idx
+  on public.payment_dates(user_id, updated_at);
+
+create index if not exists payment_dates_reminder_scan_idx
+  on public.payment_dates(due_on, user_id)
+  where deleted_at is null and paid_at is null;
+
+create index if not exists user_preferences_user_updated_at_idx
+  on public.user_preferences(user_id, updated_at);
+
+create index if not exists push_subscriptions_user_active_idx
+  on public.push_subscriptions(user_id)
+  where revoked_at is null;
+
+create unique index if not exists payment_reminder_deliveries_once_idx
+  on public.payment_reminder_deliveries(
+    subscription_id,
+    payment_date_id,
+    due_on,
+    days_before
+  );
+
+create index if not exists payment_reminder_deliveries_user_idx
+  on public.payment_reminder_deliveries(user_id, created_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -152,6 +216,79 @@ drop trigger if exists set_payment_dates_updated_at on public.payment_dates;
 create trigger set_payment_dates_updated_at
   before update on public.payment_dates
   for each row execute function public.set_updated_at();
+
+drop trigger if exists set_push_subscriptions_updated_at on public.push_subscriptions;
+create trigger set_push_subscriptions_updated_at
+  before update on public.push_subscriptions
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists set_payment_reminder_deliveries_updated_at
+  on public.payment_reminder_deliveries;
+create trigger set_payment_reminder_deliveries_updated_at
+  before update on public.payment_reminder_deliveries
+  for each row execute function public.set_updated_at();
+
+create or replace function public.claim_payment_reminder_delivery(
+  p_subscription_id uuid,
+  p_payment_date_id uuid,
+  p_due_on date,
+  p_days_before integer
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  delivery_id uuid;
+  delivery_user_id uuid;
+begin
+  select user_id
+  into delivery_user_id
+  from public.push_subscriptions
+  where id = p_subscription_id
+    and revoked_at is null;
+
+  if delivery_user_id is null then
+    return null;
+  end if;
+
+  insert into public.payment_reminder_deliveries (
+    subscription_id,
+    payment_date_id,
+    user_id,
+    due_on,
+    days_before,
+    status
+  )
+  values (
+    p_subscription_id,
+    p_payment_date_id,
+    delivery_user_id,
+    p_due_on,
+    p_days_before,
+    'sending'
+  )
+  on conflict (subscription_id, payment_date_id, due_on, days_before)
+  do nothing
+  returning id into delivery_id;
+
+  return delivery_id;
+end;
+$$;
+
+revoke all on function public.claim_payment_reminder_delivery(
+  uuid,
+  uuid,
+  date,
+  integer
+) from public, anon, authenticated;
+grant execute on function public.claim_payment_reminder_delivery(
+  uuid,
+  uuid,
+  date,
+  integer
+) to service_role;
 
 create or replace function public.ensure_transaction_category_matches()
 returns trigger
@@ -239,6 +376,8 @@ alter table public.user_preferences enable row level security;
 alter table public.categories enable row level security;
 alter table public.transactions enable row level security;
 alter table public.payment_dates enable row level security;
+alter table public.push_subscriptions enable row level security;
+alter table public.payment_reminder_deliveries enable row level security;
 
 drop policy if exists "profiles select own" on public.profiles;
 create policy "profiles select own"
@@ -328,3 +467,32 @@ create policy "payment dates update own"
   to authenticated
   using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
+
+drop policy if exists "push subscriptions select own"
+  on public.push_subscriptions;
+create policy "push subscriptions select own"
+  on public.push_subscriptions for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "push subscriptions insert own"
+  on public.push_subscriptions;
+create policy "push subscriptions insert own"
+  on public.push_subscriptions for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "push subscriptions update own"
+  on public.push_subscriptions;
+create policy "push subscriptions update own"
+  on public.push_subscriptions for update
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "push subscriptions delete own"
+  on public.push_subscriptions;
+create policy "push subscriptions delete own"
+  on public.push_subscriptions for delete
+  to authenticated
+  using ((select auth.uid()) = user_id);

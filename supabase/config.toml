@@ -1,0 +1,4 @@
+project_id = "chipsntips"
+
+[functions.send-payment-reminders]
+verify_jwt = false

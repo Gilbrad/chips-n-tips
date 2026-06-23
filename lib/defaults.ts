@@ -2,19 +2,6 @@ import type { Category, TransactionType, UserPreferences } from '@/lib/finance-t
 
 export const DEFAULT_CURRENCY = 'USD'
 
-export const SUPPORTED_CURRENCIES = [
-  { code: 'USD', label: 'US Dollar', symbol: '$', locale: 'en-US' },
-  { code: 'PHP', label: 'Philippine Peso', symbol: 'PHP', locale: 'en-PH' },
-  { code: 'EUR', label: 'Euro', symbol: 'EUR', locale: 'en-IE' },
-  { code: 'GBP', label: 'British Pound', symbol: 'GBP', locale: 'en-GB' },
-  { code: 'JPY', label: 'Japanese Yen', symbol: 'JPY', locale: 'ja-JP' },
-  { code: 'CAD', label: 'Canadian Dollar', symbol: '$', locale: 'en-CA' },
-  { code: 'AUD', label: 'Australian Dollar', symbol: '$', locale: 'en-AU' },
-  { code: 'SGD', label: 'Singapore Dollar', symbol: '$', locale: 'en-SG' },
-] as const
-
-export type SupportedCurrencyCode = (typeof SUPPORTED_CURRENCIES)[number]['code']
-
 export const DEFAULT_CATEGORY_DEFINITIONS: Array<{
   name: string
   type: TransactionType

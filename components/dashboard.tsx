@@ -180,7 +180,7 @@ export default function Dashboard() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-            Offline ledger
+            Wallet
           </p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
             Chips n&apos; Tips

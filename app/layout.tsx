@@ -7,6 +7,7 @@ import { AuthProvider } from '@/components/auth-provider'
 import AppShell from '@/components/app-shell'
 import { FinanceProvider } from '@/components/finance-provider'
 import ServiceWorkerRegister from '@/components/service-worker-register'
+import { shouldUseServiceWorker } from '@/lib/dev-flags'
 import { SpeedInsights } from "@vercel/speed-insights/next"
 import './globals.css'
 
@@ -71,7 +72,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable} bg-background`}>
       <body className="font-sans antialiased">
-        {process.env.NODE_ENV === 'production' ? (
+        {shouldUseServiceWorker() ? (
           <SerwistProvider swUrl="/serwist/sw.js">{application}</SerwistProvider>
         ) : (
           application

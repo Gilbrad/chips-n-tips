@@ -46,6 +46,7 @@ export interface PaymentDate {
   paidAt?: string
   createdAt: string
   updatedAt: string
+  deletedAt?: string
   syncStatus: SyncStatus
 }
 
@@ -61,5 +62,12 @@ export interface FinanceSnapshot {
   categories: Category[]
   paymentDates: PaymentDate[]
   preferences: UserPreferences
+  transactions: Transaction[]
+}
+
+export interface RemoteFinanceSnapshot {
+  categories: Category[]
+  paymentDates: PaymentDate[]
+  preferences?: UserPreferences
   transactions: Transaction[]
 }

@@ -2,12 +2,14 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { createDefaultCategories, createDefaultPreferences } from '@/lib/defaults'
+import { isValidCurrencyCode, normalizeCurrencyCode } from '@/lib/currencies'
 import {
   LOCAL_USER_ID,
   type Category,
   type FinanceSnapshot,
   type PaymentDate,
   type Recurrence,
+  type RemoteFinanceSnapshot,
   type SyncStatus,
   type Transaction,
   type TransactionType,
@@ -16,7 +18,16 @@ import {
 import { toDateInputValue } from '@/lib/dates'
 
 const DB_NAME = 'chipsntips-local'
-const DB_VERSION = 1
+const DB_VERSION = 2
+
+export interface RemoteSyncMetadata {
+  userId: string
+  categoryUpdatedAt?: string
+  paymentDateUpdatedAt?: string
+  preferenceUpdatedAt?: string
+  transactionUpdatedAt?: string
+  updatedAt: string
+}
 
 interface ChipsNTipsDb extends DBSchema {
   categories: {
@@ -39,6 +50,10 @@ interface ChipsNTipsDb extends DBSchema {
     key: string
     value: UserPreferences
   }
+  syncMetadata: {
+    key: string
+    value: RemoteSyncMetadata
+  }
   transactions: {
     key: string
     value: Transaction
@@ -52,28 +67,57 @@ interface ChipsNTipsDb extends DBSchema {
 
 let dbPromise: Promise<IDBPDatabase<ChipsNTipsDb>> | null = null
 
+function createIndexIfMissing(
+  store: { indexNames: DOMStringList },
+  name: string,
+  keyPath: string | string[],
+) {
+  if (!store.indexNames.contains(name)) {
+    ;(
+      store as unknown as {
+        createIndex: (indexName: string, indexKeyPath: string | string[]) => unknown
+      }
+    ).createIndex(name, keyPath)
+  }
+}
+
 function getDb() {
   if (!dbPromise) {
     dbPromise = openDB<ChipsNTipsDb>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const categories = db.createObjectStore('categories', { keyPath: 'id' })
-        categories.createIndex('by-user', 'userId')
-        categories.createIndex('by-user-type', ['userId', 'type'])
+      upgrade(db, _oldVersion, _newVersion, transaction) {
+        const categories = db.objectStoreNames.contains('categories')
+          ? transaction.objectStore('categories')
+          : db.createObjectStore('categories', { keyPath: 'id' })
+        createIndexIfMissing(categories, 'by-user', 'userId')
+        createIndexIfMissing(categories, 'by-user-type', ['userId', 'type'])
 
-        const paymentDates = db.createObjectStore('paymentDates', {
-          keyPath: 'id',
-        })
-        paymentDates.createIndex('by-user', 'userId')
-        paymentDates.createIndex('by-user-date', ['userId', 'dueOn'])
+        const paymentDates = db.objectStoreNames.contains('paymentDates')
+          ? transaction.objectStore('paymentDates')
+          : db.createObjectStore('paymentDates', {
+              keyPath: 'id',
+            })
+        createIndexIfMissing(paymentDates, 'by-user', 'userId')
+        createIndexIfMissing(paymentDates, 'by-user-date', ['userId', 'dueOn'])
 
-        db.createObjectStore('preferences', { keyPath: 'userId' })
+        if (!db.objectStoreNames.contains('preferences')) {
+          db.createObjectStore('preferences', { keyPath: 'userId' })
+        }
 
-        const transactions = db.createObjectStore('transactions', {
-          keyPath: 'id',
-        })
-        transactions.createIndex('by-user', 'userId')
-        transactions.createIndex('by-user-date', ['userId', 'occurredOn'])
-        transactions.createIndex('by-user-type', ['userId', 'type'])
+        if (!db.objectStoreNames.contains('syncMetadata')) {
+          db.createObjectStore('syncMetadata', { keyPath: 'userId' })
+        }
+
+        const transactions = db.objectStoreNames.contains('transactions')
+          ? transaction.objectStore('transactions')
+          : db.createObjectStore('transactions', {
+              keyPath: 'id',
+            })
+        createIndexIfMissing(transactions, 'by-user', 'userId')
+        createIndexIfMissing(transactions, 'by-user-date', [
+          'userId',
+          'occurredOn',
+        ])
+        createIndexIfMissing(transactions, 'by-user-type', ['userId', 'type'])
       },
     })
   }
@@ -213,7 +257,7 @@ export async function loadFinanceSnapshot(userId: string): Promise<FinanceSnapsh
     categories,
     paymentDates: paymentDates.sort((first, second) =>
       first.dueOn.localeCompare(second.dueOn),
-    ),
+    ).filter((paymentDate) => !paymentDate.deletedAt),
     preferences: preferences ?? createDefaultPreferences(userId),
     transactions: transactions
       .filter((transaction) => !transaction.deletedAt)
@@ -390,11 +434,11 @@ export async function addPaymentDate(input: {
   return paymentDate
 }
 
-export async function togglePaymentDatePaid(id: string) {
+export async function togglePaymentDatePaid(id: string, userId: string) {
   const db = await getDb()
   const paymentDate = await db.get('paymentDates', id)
 
-  if (!paymentDate) {
+  if (!paymentDate || paymentDate.userId !== userId || paymentDate.deletedAt) {
     return null
   }
 
@@ -410,13 +454,40 @@ export async function togglePaymentDatePaid(id: string) {
   return updated
 }
 
+export async function deletePaymentDate(id: string, userId: string) {
+  const db = await getDb()
+  const paymentDate = await db.get('paymentDates', id)
+
+  if (!paymentDate || paymentDate.userId !== userId || paymentDate.deletedAt) {
+    return null
+  }
+
+  const now = new Date().toISOString()
+  const deleted: PaymentDate = {
+    ...paymentDate,
+    deletedAt: now,
+    updatedAt: now,
+    syncStatus: 'pending',
+  }
+
+  await db.put('paymentDates', deleted)
+
+  return deleted
+}
+
 export async function updateCurrency(userId: string, currency: string) {
+  const normalizedCurrency = normalizeCurrencyCode(currency)
+
+  if (!isValidCurrencyCode(normalizedCurrency)) {
+    throw new Error('Currency code is invalid.')
+  }
+
   const db = await getDb()
   const existing = await db.get('preferences', userId)
   const now = new Date().toISOString()
   const preferences: UserPreferences = {
     ...(existing ?? createDefaultPreferences(userId)),
-    currency,
+    currency: normalizedCurrency,
     updatedAt: now,
     syncStatus: 'pending',
   }
@@ -454,13 +525,44 @@ export async function getLocalImportSummary(): Promise<LocalImportSummary> {
     customCategories,
     hasData:
       transactions.some((transaction) => !transaction.deletedAt) ||
-      paymentDates.length > 0 ||
+      paymentDates.some((paymentDate) => !paymentDate.deletedAt) ||
       customCategories > 0 ||
       hasCustomPreferences,
-    paymentDates: paymentDates.length,
+    paymentDates: paymentDates.filter((paymentDate) => !paymentDate.deletedAt)
+      .length,
     transactions: transactions.filter((transaction) => !transaction.deletedAt)
       .length,
   }
+}
+
+export async function deleteLocalDeviceData() {
+  await seedUserData(LOCAL_USER_ID)
+
+  const db = await getDb()
+  const [categories, paymentDates, transactions] = await Promise.all([
+    db.getAllFromIndex('categories', 'by-user', LOCAL_USER_ID),
+    db.getAllFromIndex('paymentDates', 'by-user', LOCAL_USER_ID),
+    db.getAllFromIndex('transactions', 'by-user', LOCAL_USER_ID),
+  ])
+  const tx = db.transaction(
+    ['categories', 'paymentDates', 'preferences', 'transactions'],
+    'readwrite',
+  )
+
+  await Promise.all([
+    ...categories.map((category) =>
+      tx.objectStore('categories').delete(category.id),
+    ),
+    ...paymentDates.map((paymentDate) =>
+      tx.objectStore('paymentDates').delete(paymentDate.id),
+    ),
+    ...transactions.map((transaction) =>
+      tx.objectStore('transactions').delete(transaction.id),
+    ),
+    tx.objectStore('preferences').delete(LOCAL_USER_ID),
+  ])
+
+  await tx.done
 }
 
 export async function importLocalDataForUser(userId: string) {
@@ -542,13 +644,18 @@ export async function importLocalDataForUser(userId: string) {
       id: createId(),
       userId,
       categoryId,
-      createdAt: now,
+      createdAt: transaction.createdAt,
       updatedAt: now,
+      occurredOn: transaction.occurredOn,
       syncStatus: 'pending',
     })
   }
 
   for (const paymentDate of localPaymentDates) {
+    if (paymentDate.deletedAt) {
+      continue
+    }
+
     await tx.objectStore('paymentDates').put({
       ...paymentDate,
       id: createId(),
@@ -556,7 +663,7 @@ export async function importLocalDataForUser(userId: string) {
       categoryId: paymentDate.categoryId
         ? categoryIdMap.get(paymentDate.categoryId)
         : undefined,
-      createdAt: now,
+      createdAt: paymentDate.createdAt,
       updatedAt: now,
       syncStatus: 'pending',
     })
@@ -575,10 +682,24 @@ export async function importLocalDataForUser(userId: string) {
     })
   }
 
+  await Promise.all([
+    ...localCategories.map((category) =>
+      tx.objectStore('categories').delete(category.id),
+    ),
+    ...localPaymentDates.map((paymentDate) =>
+      tx.objectStore('paymentDates').delete(paymentDate.id),
+    ),
+    ...localTransactions.map((transaction) =>
+      tx.objectStore('transactions').delete(transaction.id),
+    ),
+    tx.objectStore('preferences').delete(LOCAL_USER_ID),
+  ])
+
   await tx.done
 
   return {
-    paymentDates: localPaymentDates.length,
+    paymentDates: localPaymentDates.filter((paymentDate) => !paymentDate.deletedAt)
+      .length,
     transactions: localTransactions.filter((transaction) => !transaction.deletedAt)
       .length,
   }
@@ -603,6 +724,25 @@ export async function loadSyncSnapshot(userId: string): Promise<FinanceSnapshot>
   }
 }
 
+export async function loadRemoteSyncMetadata(userId: string) {
+  const db = await getDb()
+
+  return db.get('syncMetadata', userId)
+}
+
+export async function saveRemoteSyncMetadata(
+  userId: string,
+  metadata: Omit<RemoteSyncMetadata, 'updatedAt' | 'userId'>,
+) {
+  const db = await getDb()
+
+  await db.put('syncMetadata', {
+    ...metadata,
+    updatedAt: new Date().toISOString(),
+    userId,
+  })
+}
+
 function shouldKeepLocal(
   local: { syncStatus: SyncStatus; updatedAt: string } | undefined,
 ) {
@@ -615,7 +755,7 @@ function shouldKeepLocal(
 
 export async function mergeRemoteFinanceSnapshot(
   userId: string,
-  remote: FinanceSnapshot,
+  remote: RemoteFinanceSnapshot,
 ) {
   await seedUserData(userId)
 
@@ -723,7 +863,7 @@ export async function mergeRemoteFinanceSnapshot(
     }
   }
 
-  if (!shouldKeepLocal(localPreferences)) {
+  if (remote.preferences && !shouldKeepLocal(localPreferences)) {
     await tx.objectStore('preferences').put(remote.preferences)
   }
 
