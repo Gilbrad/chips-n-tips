@@ -18,6 +18,7 @@ import {
   canUseSupabasePushReminders,
   disableRemotePaymentReminders,
   enableRemotePaymentReminders,
+  getPushReminderErrorMessage,
 } from '@/lib/push-notifications'
 
 function getStatusText(
@@ -107,8 +108,9 @@ export default function PaymentReminderSettings() {
       }
 
       setPaymentReminderPreference(userId, true)
-    } catch {
-      setError('Could not save reminder settings. Please try again.')
+    } catch (caughtError) {
+      console.error('Could not save reminder settings.', caughtError)
+      setError(getPushReminderErrorMessage(caughtError))
     } finally {
       setIsSaving(false)
     }

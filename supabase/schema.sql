@@ -290,6 +290,73 @@ grant execute on function public.claim_payment_reminder_delivery(
   integer
 ) to service_role;
 
+create or replace function public.upsert_push_subscription(
+  p_endpoint text,
+  p_p256dh text,
+  p_auth text,
+  p_timezone text,
+  p_user_agent text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  subscription_id uuid;
+  current_user_id uuid := auth.uid();
+begin
+  if current_user_id is null then
+    raise exception 'A signed-in user is required to save push subscriptions.';
+  end if;
+
+  insert into public.push_subscriptions (
+    user_id,
+    endpoint,
+    p256dh,
+    auth,
+    timezone,
+    user_agent,
+    revoked_at
+  )
+  values (
+    current_user_id,
+    p_endpoint,
+    p_p256dh,
+    p_auth,
+    coalesce(nullif(trim(p_timezone), ''), 'UTC'),
+    p_user_agent,
+    null
+  )
+  on conflict (endpoint)
+  do update
+    set user_id = current_user_id,
+        p256dh = excluded.p256dh,
+        auth = excluded.auth,
+        timezone = excluded.timezone,
+        user_agent = excluded.user_agent,
+        revoked_at = null
+  returning id into subscription_id;
+
+  return subscription_id;
+end;
+$$;
+
+revoke all on function public.upsert_push_subscription(
+  text,
+  text,
+  text,
+  text,
+  text
+) from public, anon;
+grant execute on function public.upsert_push_subscription(
+  text,
+  text,
+  text,
+  text,
+  text
+) to authenticated;
+
 create or replace function public.ensure_transaction_category_matches()
 returns trigger
 language plpgsql

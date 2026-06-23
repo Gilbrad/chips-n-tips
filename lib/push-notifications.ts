@@ -102,15 +102,66 @@ async function upsertRemotePushSubscription(
   subscription: PushSubscription,
 ) {
   const supabase = createClient()
-  const { error } = await supabase
-    .from('push_subscriptions')
-    .upsert(toPushSubscriptionRow(userId, subscription), {
-      onConflict: 'endpoint',
-    })
+  const row = toPushSubscriptionRow(userId, subscription)
+  const { error } = await supabase.rpc('upsert_push_subscription', {
+    p_auth: row.auth,
+    p_endpoint: row.endpoint,
+    p_p256dh: row.p256dh,
+    p_timezone: row.timezone,
+    p_user_agent: row.user_agent,
+  })
 
   if (error) {
     throw error
   }
+}
+
+export function getPushReminderErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error && 'message' in error
+        ? String(error.message)
+        : String(error)
+  const lowerMessage = message.toLowerCase()
+
+  if (lowerMessage.includes('upsert_push_subscription')) {
+    return 'Reminder database setup is missing. Re-run supabase/schema.sql, then redeploy.'
+  }
+
+  if (
+    lowerMessage.includes('push_subscriptions') ||
+    lowerMessage.includes('schema cache') ||
+    lowerMessage.includes('relation') ||
+    lowerMessage.includes('table')
+  ) {
+    return 'Reminder database tables are missing. Re-run supabase/schema.sql in Supabase.'
+  }
+
+  if (
+    lowerMessage.includes('applicationserverkey') ||
+    lowerMessage.includes('vapid') ||
+    lowerMessage.includes('invalid character')
+  ) {
+    return 'The deployed VAPID public key is missing or invalid. Check NEXT_PUBLIC_VAPID_PUBLIC_KEY.'
+  }
+
+  if (
+    lowerMessage.includes('service worker') ||
+    lowerMessage.includes('not supported')
+  ) {
+    return 'Push is not ready in this browser yet. Refresh after the app finishes installing, then try again.'
+  }
+
+  if (
+    lowerMessage.includes('row-level security') ||
+    lowerMessage.includes('permission denied') ||
+    lowerMessage.includes('unauthorized')
+  ) {
+    return 'Supabase rejected the subscription save. Make sure you are signed in and the latest schema policies are applied.'
+  }
+
+  return message || 'Could not save reminder settings. Please try again.'
 }
 
 async function revokeRemotePushSubscription(
